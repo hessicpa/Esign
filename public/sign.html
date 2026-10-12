@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>線上簽署</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600&display=swap">
+<link rel="stylesheet" href="app.css">
+<style>html,body{margin:0}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+
+<div class="wrap" id="viewMsg">
+  <div class="msg"><h2 id="msgTitle">文件載入中…</h2><p id="msgText" class="small"></p></div>
+</div>
+
+<div class="wrap" id="viewClient" hidden>
+  <div class="preview-bar" id="previewBar" hidden><span>預覽模式：簽名不會傳回事務所</span></div>
+  <header>
+    <div class="firm" id="firm"></div>
+    <h1 id="docTitle"></h1>
+    <ol class="steps" id="steps"><li data-s="read">閱讀內容</li><li data-s="agree">勾選同意</li><li data-s="sign">手寫簽名</li><li data-s="done">傳回事務所</li></ol>
+    <p class="hint" id="hint"></p>
+    <p class="notice" id="signedBefore" hidden></p>
+  </header>
+  <div id="pages"></div>
+  <section class="qcard" id="qSection" hidden>
+    <h2>請勾選以下項目</h2>
+    <div id="qList" class="cards"></div>
+  </section>
+  <section class="done" id="done" hidden>
+    <h2>簽署完成</h2>
+    <p class="status wait" id="upStatus">正在傳回事務所…</p>
+    <div class="btns"><button id="btnRetry" hidden>重新傳送</button></div>
+    <p class="small">你也可以下載一份留存。有問題請聯絡事務所：</p>
+    <div class="contact" id="contact"></div>
+  </section>
+</div>
+
+<div class="bar" id="bar" hidden>
+  <div class="in" id="barSign">
+    <label class="agree" for="agree"><input type="checkbox" id="agree"><span>我已閱讀並同意本文件全部內容</span></label>
+    <div class="btns"><button class="primary" id="btnSign" disabled>簽名</button></div>
+  </div>
+  <div class="in" id="barDone" hidden>
+    <div class="btns">
+      <button class="primary" id="btnPdf">下載已簽 PDF</button>
+      <button id="btnShare" hidden>分享 PDF</button>
+    </div>
+    <div class="btns"><button id="btnRedo">重新簽名</button></div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="padTitle">
+    <h2 id="padTitle">請用手指在框內簽名</h2>
+    <p>簽好後按「確認簽名」，簽名會自動放到文件的簽名欄。手機橫放會比較好寫。</p>
+    <div class="padbox" id="padbox"><div class="base"></div><div class="x">✕</div><canvas id="pad"></canvas></div>
+    <div class="btns">
+      <button id="padClear">清除重寫</button>
+      <button id="padCancel">取消</button>
+      <button class="primary" id="padOk" disabled>確認簽名</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
+<script src="common.js"></script>
+<script src="sign.js"></script>
+</body>
+</html>
