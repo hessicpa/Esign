@@ -3,7 +3,7 @@ import { store, json, pdfResponse, isPdf, cleanMeta, ID_RE, MAX_PDF } from "../l
 
 /* 管理後台 API。每個請求都要在 x-admin-key 標頭帶上管理密碼，
    密碼設定在 Netlify 的環境變數 ADMIN_PASSWORD。
-   ?a=ping | list | create | delete | signed | pdf | settings */
+   ?a=ping | list | create | delete | signed | pdf | reopen | settings */
 const sha = s => createHash("sha256").update(String(s)).digest();
 function authorized(req) {
   const pw = process.env.ADMIN_PASSWORD || "";
@@ -64,11 +64,21 @@ export default async (req) => {
     return pdfResponse(buf, fileName(meta));
   }
 
+  // 開放／取消開放重簽（超過 1 小時已歸檔的合約，開放後客戶可再簽一次）
+  if (a === "reopen" && req.method === "POST") {
+    if (!ID_RE.test(id)) return json({ error: "not_found" }, 404);
+    const meta = await s.get(`contracts/${id}.json`, { type: "json" });
+    if (!meta) return json({ error: "not_found" }, 404);
+    meta.resignAllowed = url.searchParams.get("on") === "1";
+    await s.setJSON(`contracts/${id}.json`, meta);
+    return json({ ok: true, contract: meta });
+  }
+
   if (a === "settings" && req.method === "POST") {
     let body;
     try { body = await req.json(); } catch { return json({ error: "bad_request" }, 400); }
     const clean = v => (typeof v === "string" ? v.trim().slice(0, 100) : "");
-    const settings = { firm: clean(body.firm), line: clean(body.line).replace(/\s+/g, "") };
+    const settings = { firm: clean(body.firm) };
     await s.setJSON("settings.json", settings);
     return json({ ok: true, settings });
   }

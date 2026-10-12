@@ -1,9 +1,10 @@
-import { store, json, pdfResponse, isPdf, ID_RE, MAX_SIGNED } from "../lib/common.mjs";
+import { store, json, pdfResponse, isPdf, ID_RE, MAX_SIGNED, canResign, lockAt } from "../lib/common.mjs";
 
 /* 客戶端 API（不用登入，靠連結裡的合約代碼辨識）
-   GET  /api/c?c=<id>            合約資訊（標題、簽名位置、題目…）
-   GET  /api/c?c=<id>&f=pdf      原始 PDF
-   POST /api/c?c=<id>&f=signed   上傳簽好的 PDF（自動傳回事務所） */
+   GET  /api/c?c=<id>              合約資訊（標題、簽名位置、題目、簽署狀態）
+   GET  /api/c?c=<id>&f=pdf        原始 PDF
+   GET  /api/c?c=<id>&f=signed     客戶自己簽好的 PDF
+   POST /api/c?c=<id>&f=signed     上傳簽好的 PDF（自動傳回事務所；歸檔後拒絕） */
 export default async (req) => {
   const url = new URL(req.url);
   const id = url.searchParams.get("c") || "";
@@ -17,8 +18,10 @@ export default async (req) => {
   if (req.method === "GET" && f === "meta") {
     const settings = (await s.get("settings.json", { type: "json" })) || {};
     const { name, title, sig, date, questions, summary, signedAt } = meta;
+    const la = lockAt(meta);
     return json({ name, title, sig, date, questions: questions || [], summary, signedAt: signedAt || null,
-      firm: settings.firm || "", line: settings.line || "" });
+      canResign: canResign(meta), lockAt: la ? new Date(la).toISOString() : null,
+      firm: settings.firm || "" });
   }
 
   if (req.method === "GET" && f === "pdf") {
@@ -26,7 +29,6 @@ export default async (req) => {
     return buf ? pdfResponse(buf) : json({ error: "not_found" }, 404);
   }
 
-  // 客戶自己簽好的那份：用一般網址開啟，LINE 內建瀏覽器、iPhone、Android 都能看/存
   if (req.method === "GET" && f === "signed") {
     const buf = await s.get(`signed/${id}`, { type: "arrayBuffer" });
     if (!buf) return json({ error: "not_found" }, 404);
@@ -35,16 +37,21 @@ export default async (req) => {
   }
 
   if (req.method === "POST" && f === "signed") {
+    if (!canResign(meta)) return json({ error: "locked" }, 423);
     const len = Number(req.headers.get("content-length") || 0);
     if (len > MAX_SIGNED) return json({ error: "too_large" }, 413);
     const buf = await req.arrayBuffer();
     if (buf.byteLength > MAX_SIGNED) return json({ error: "too_large" }, 413);
     if (!isPdf(buf)) return json({ error: "not_pdf" }, 400);
     await s.set(`signed/${id}`, buf);
-    meta.signedAt = new Date().toISOString();
+    const now = new Date().toISOString();
+    // 第一次簽、或管理人員開放重簽後的這次簽署，重新起算 1 小時
+    if (!meta.signedAt || meta.resignAllowed) meta.firstSignedAt = now;
+    meta.resignAllowed = false;
+    meta.signedAt = now;
     meta.signCount = (meta.signCount || 0) + 1;
     await s.setJSON(`contracts/${id}.json`, meta);
-    return json({ ok: true, signedAt: meta.signedAt });
+    return json({ ok: true, signedAt: now, canResign: canResign(meta), lockAt: new Date(lockAt(meta)).toISOString() });
   }
 
   return json({ error: "bad_request" }, 400);

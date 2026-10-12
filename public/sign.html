@@ -34,8 +34,6 @@
     <h2>簽署完成</h2>
     <p class="status wait" id="upStatus">正在傳回事務所…</p>
     <div class="btns"><button id="btnRetry" hidden>重新傳送</button></div>
-    <p class="small">你也可以下載一份留存。有問題請聯絡事務所：</p>
-    <div class="contact" id="contact"></div>
   </section>
 </div>
 
@@ -45,12 +43,9 @@
     <div class="btns"><button class="primary" id="btnSign" disabled>簽名</button></div>
   </div>
   <div class="in" id="barDone" hidden>
-    <div class="btns">
-      <a class="btnlink seal" id="btnPdf" href="#" target="_blank" rel="noopener">下載已簽 PDF</a>
-      <button id="btnShare" hidden>分享 PDF</button>
-    </div>
-    <p class="small" id="lineTip" hidden>如果在 LINE 裡按下載沒有反應：點右上角「⋯」→「用預設瀏覽器開啟」，再按一次下載。</p>
-    <div class="btns"><button id="btnRedo">重新簽名</button></div>
+    <div class="btns"><button class="primary" id="btnShare">回傳已簽署PDF</button></div>
+    <p class="small" id="keepTip">PDF 回傳予本事務所後，請同時自行下載留存一份，以供日後查閱。</p>
+    <div class="btns"><button id="btnRedo">重新簽署</button></div>
   </div>
 </div>
 
@@ -64,6 +59,13 @@
       <button id="padCancel">取消</button>
       <button class="primary" id="padOk" disabled>確認簽名</button>
     </div>
+  </div>
+</div>
+<div class="scrim" id="noticeScrim" hidden>
+  <div class="sheet" role="alertdialog" aria-modal="true" aria-labelledby="noticeTitle">
+    <h2 id="noticeTitle"></h2>
+    <p id="noticeText"></p>
+    <div class="btns"><button class="primary" id="noticeOk">知道了</button></div>
   </div>
 </div>
 <div class="toast" id="toast" hidden></div>

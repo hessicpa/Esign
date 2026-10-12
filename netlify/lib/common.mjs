@@ -30,6 +30,18 @@ export function isPdf(buf) {
   return String.fromCharCode(...h) === "%PDF-";
 }
 
+/* 重簽管控：第一次簽完 1 小時內可以重簽（覆蓋，保留最新）；
+   超過 1 小時就歸檔，要管理人員在後台按「開放重簽」才可以再簽一次。 */
+export const RESIGN_WINDOW_MS = 60 * 60 * 1000;
+export function lockAt(meta) {
+  if (!meta.signedAt) return null;
+  return Date.parse(meta.firstSignedAt || meta.signedAt) + RESIGN_WINDOW_MS;
+}
+export function canResign(meta, now = Date.now()) {
+  if (!meta.signedAt || meta.resignAllowed) return true;
+  return now <= lockAt(meta);
+}
+
 const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const num = (v, lo, hi) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : null);
 const pt = (o, pages) => {

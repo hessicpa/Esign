@@ -40,7 +40,7 @@ async function loadList(highlightId){
   catch (e) { if (e.message !== "unauthorized" && e.message !== "no_password") err("listErr", "讀取清單失敗，請按重新整理。"); return; }
   CONTRACTS = data.contracts || []; SETTINGS = data.settings || {};
   $("aFirm").textContent = (SETTINGS.firm ? SETTINGS.firm + "・" : "") + "管理後台";
-  $("sFirm").value = SETTINGS.firm || ""; $("sLine").value = SETTINGS.line || "";
+  $("sFirm").value = SETTINGS.firm || "";
   const ul = $("list"); ul.innerHTML = "";
   if (!CONTRACTS.length){ const li = document.createElement("li"); li.className = "small"; li.textContent = "還沒有合約。按「＋ 新增合約」上傳第一份。"; ul.append(li); }
   for (const c of CONTRACTS){
@@ -50,8 +50,11 @@ async function loadList(highlightId){
     badge.className = "badge " + (c.signedAt ? "done" : "wait");
     badge.textContent = c.signedAt ? `已簽署 ${fmtDateTime(new Date(c.signedAt))}` : "等待簽署";
     t.append(badge);
+    const st = resignState(c);
+    if (st){ const b2 = document.createElement("span"); b2.className = "badge " + st.cls; b2.textContent = st.text; t.append(b2); }
     const meta = document.createElement("div"); meta.className = "meta";
-    meta.textContent = `${c.title}・建立於 ${fmtDate(new Date(c.created))}` + (c.signCount > 1 ? `・客戶簽了 ${c.signCount} 次，保留最新一份` : "");
+    meta.textContent = `${c.title}・建立於 ${fmtDate(new Date(c.created))}`
+      + (c.signCount > 1 ? `・客戶簽了 ${c.signCount} 次，保留最新一份` : "");
     const row = document.createElement("div"); row.className = "row";
     const link = linkFor(c.id);
     const box = document.createElement("input"); box.className = "linkbox"; box.readOnly = true; box.value = link; box.hidden = c.id !== highlightId;
@@ -65,6 +68,21 @@ async function loadList(highlightId){
       const dl = document.createElement("button"); dl.className = "small"; dl.textContent = "下載已簽 PDF";
       dl.onclick = () => downloadPdf(c, "signed", dl);
       row.append(dl);
+      const st2 = resignState(c);
+      if (st2 && st2.key !== "window"){
+        const on = st2.key === "archived";
+        const rb = document.createElement("button"); rb.className = "small"; rb.textContent = on ? "開放重簽" : "取消開放重簽";
+        rb.onclick = async () => {
+          rb.disabled = true;
+          try {
+            const r = await api("reopen", { method: "POST", query: `&c=${encodeURIComponent(c.id)}&on=${on ? 1 : 0}` });
+            if (!r.ok) throw new Error(r.status);
+            toast(on ? "已開放：客戶可以再簽一次，簽完會自動重新歸檔" : "已取消開放重簽");
+            await loadList();
+          } catch (e) { rb.disabled = false; if (e.message !== "unauthorized") err("listErr", "操作失敗，請再試一次。"); }
+        };
+        row.append(rb);
+      }
     }
     const og = document.createElement("button"); og.className = "small"; og.textContent = "原始 PDF";
     og.onclick = () => downloadPdf(c, "pdf", og);
@@ -89,13 +107,24 @@ async function downloadPdf(c, kind, btn){
   } catch (e) { if (e.message !== "unauthorized") toast("下載失敗，請再試一次"); }
   finally { btn.disabled = false; btn.textContent = label; }
 }
+
+/* 重簽狀態：簽完 1 小時內客戶可自行重簽；之後歸檔，需要在這裡「開放重簽」 */
+const WINDOW_MS = 60 * 60 * 1000;
+function resignState(c){
+  if (!c.signedAt) return null;
+  if (c.resignAllowed) return { key: "open", cls: "wait", text: "已開放重簽" };
+  const lock = Date.parse(c.firstSignedAt || c.signedAt) + WINDOW_MS;
+  if (Date.now() <= lock) return { key: "window", cls: "wait", text: `客戶可自行重簽至 ${fmtDateTime(new Date(lock)).slice(11)}` };
+  return { key: "archived", cls: "wait", text: "已歸檔" };
+}
+
 $("btnRefresh").onclick = () => loadList();
 document.addEventListener("visibilitychange", () => { if (!document.hidden && KEY && $("editor").hidden) loadList(); });
 
 $("btnSaveSettings").onclick = async () => {
   err("setErr", ""); $("btnSaveSettings").disabled = true;
   try {
-    const r = await api("settings", { method: "POST", body: JSON.stringify({ firm: $("sFirm").value, line: $("sLine").value }) });
+    const r = await api("settings", { method: "POST", body: JSON.stringify({ firm: $("sFirm").value }) });
     if (!r.ok) throw new Error(r.status);
     toast("已儲存"); await loadList();
   } catch (e) { if (e.message !== "unauthorized") err("setErr", "儲存失敗，請再試一次。"); }

@@ -34,7 +34,7 @@ async function boot(){
   $("firm").textContent = C.firm || "";
   $("docTitle").textContent = C.title;
   $("previewBar").hidden = !PREVIEW;
-  renderQuestions(); renderContacts();
+  renderQuestions();
   show("viewClient");
   if (C.signedAt && !PREVIEW && await showSignedView()) return;
   $("pages").innerHTML = '<div class="loading">文件載入中…</div>';
@@ -64,25 +64,42 @@ async function showSignedView(){
     await renderPages(signedBytes, false);
   } catch (e) { console.error(e); return false; }
   setBanner();
-  $("hint").textContent = "以下是你簽好的文件。如需修改，可以按「重新簽署」，事務所會收到新的版本。";
+  $("hint").textContent = C.canResign && C.lockAt
+    ? `以下是你簽好的文件。如需修改，可在 ${zhDateTime(new Date(C.lockAt))} 前按「重新簽署」。`
+    : "以下是你簽好的文件。";
   $("qSection").hidden = true;
   $("barSign").hidden = true; $("barDone").hidden = false;
   $("done").hidden = true;
-  $("btnRedo").textContent = "重新簽署";
-  $("btnPdf").href = signedUrl();
   setStep("done");
   return true;
 }
 
-function renderContacts(){
-  const box = $("contact"); box.innerHTML = "";
-  if (!C.line) { box.hidden = true; return; }
-  const lab = document.createElement("span"); lab.textContent = "事務所 LINE ID";
-  const code = document.createElement("code"); code.textContent = C.line;
-  const b = document.createElement("button"); b.className = "small"; b.textContent = "複製";
-  b.onclick = () => copyText(C.line).then(ok => toast(ok ? "已複製" : "請長按 ID 手動複製"));
-  box.append(lab, code, b);
+/* ---------- 提示視窗（取代瀏覽器的 alert） ---------- */
+function notice(title, text){
+  $("noticeTitle").textContent = title; $("noticeText").textContent = text || "";
+  $("noticeScrim").hidden = false; $("noticeOk").focus();
 }
+$("noticeOk").onclick = () => { $("noticeScrim").hidden = true; };
+const ARCHIVED = ["合約已歸檔", "合約已歸檔，如欲變更，請通知管理人員。"];
+
+/* ---------- 回傳已簽署PDF：打開手機分享畫面（可選 LINE 傳給事務所） ---------- */
+const canShareFiles = (() => {
+  try { return !!(navigator.canShare && navigator.canShare({ files: [new File([new Uint8Array(8)], "a.pdf", { type: "application/pdf" })] })); }
+  catch { return false; }
+})();
+function sharePdf(){
+  // 必須在使用者按下的當下呼叫，手機才會打開分享畫面
+  return navigator.share({ files: [new File([signedBytes], fileName(), { type: "application/pdf" })], title: C.title });
+}
+async function sharePdfNow(){
+  if (!canShareFiles){
+    notice("這個瀏覽器無法直接分享檔案", "請點右上角「⋯」→「用預設瀏覽器開啟」（或用 Safari／Chrome 打開這個連結），再按一次「回傳已簽署PDF」。");
+    return;
+  }
+  try { await sharePdf(); }
+  catch (e) { if (e && e.name !== "AbortError") toast("無法分享，請再試一次"); }
+}
+$("btnShare").onclick = () => { if (signedBytes) sharePdfNow(); };
 
 async function renderPages(bytes, interactive){
   const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
@@ -294,7 +311,8 @@ function setUp(state){
     sending: ["wait", "正在傳回事務所…"],
     ok: ["ok", "✓ 已自動傳回事務所，不需要再另外傳送。"],
     preview: ["wait", "預覽模式：這份簽名沒有傳回事務所。"],
-    big: ["bad", "檔案太大，無法自動傳回。請按「下載已簽 PDF」後用 LINE 傳給事務所。"],
+    big: ["bad", "檔案太大，無法自動傳回。請按「回傳已簽署PDF」傳給事務所。"],
+    locked: ["bad", "合約已歸檔，這次的簽名沒有送出。如欲變更，請通知管理人員。"],
     fail: ["bad", "傳回事務所失敗，請確認網路後按「重新傳送」。"],
   };
   const [cls, text] = map[state];
@@ -307,12 +325,18 @@ async function upload(){
   try {
     const r = await fetch(`/api/c?c=${encodeURIComponent(CID)}&f=signed`, { method: "POST", headers: { "content-type": "application/pdf" }, body: signedBytes });
     if (r.status === 413) return setUp("big");
+    if (r.status === 423){
+      // 已超過重簽期限：這次簽名不會送出，改回顯示已歸檔的那一份
+      setUp("locked"); notice(...ARCHIVED);
+      C.canResign = false;
+      await showSignedView(); setBanner();
+      return;
+    }
     if (!r.ok) throw new Error(r.status);
     const res = await r.json();
-    C.signedAt = res.signedAt;
-    $("btnPdf").href = signedUrl();
+    C.signedAt = res.signedAt; C.canResign = res.canResign; C.lockAt = res.lockAt;
     setUp("ok"); setStep("done"); setBanner();
-    $("upStatus").textContent = `✓ ${zhDateTime(new Date(C.signedAt))} 已簽署，回傳事務所完成，不需要再另外傳送。`;
+    $("upStatus").textContent = `✓ ${zhDateTime(new Date(C.signedAt))} 已簽署，回傳事務所完成。`;
   } catch (e) { console.error(e); setUp("fail"); }
 }
 $("btnRetry").onclick = upload;
@@ -331,33 +355,30 @@ $("padOk").onclick = async () => {
   } catch (e) { console.error(e); toast("簽名放入文件時出錯，請再試一次"); }
   finally { $("padOk").textContent = "確認簽名"; $("padOk").disabled = strokes.length === 0; }
 };
+
+/* 重新簽署：先向伺服器確認還在 1 小時內（或管理人員已開放），否則顯示已歸檔 */
 $("btnRedo").onclick = async () => {
+  if (!PREVIEW && C.signedAt){
+    $("btnRedo").disabled = true;
+    try {
+      const r = await fetch(`/api/c?c=${encodeURIComponent(CID)}`);
+      if (r.ok){ const m = await r.json(); C.canResign = m.canResign; C.lockAt = m.lockAt; }
+    } catch {}
+    $("btnRedo").disabled = false;
+    if (!C.canResign){ notice(...ARCHIVED); return; }
+  }
   signedBytes = null; strokes = [];
   $("done").hidden = true; $("barDone").hidden = true; $("barSign").hidden = false; $("signedBanner").hidden = true;
-  $("btnPdf").href = "#";
   $("qSection").hidden = !C.questions.length;
   lockQuestions(false);
-  $("hint").textContent = "可以修改勾選內容後重新簽名，簽完會再傳一次給事務所。";
+  $("hint").textContent = C.lockAt && !PREVIEW
+    ? `請在 ${zhDateTime(new Date(C.lockAt))} 前完成重新簽署，簽完會取代先前的版本。`
+    : "可以修改勾選內容後重新簽名。";
   const r = await renderPages(C.pdfBytes, true);
   origPdf = r.doc;
   setStep($("agree").checked ? "sign" : "agree");
 };
 
 const fileName = () => [cleanName(C.name), cleanName(C.title) || "文件"].filter(Boolean).join("_") + ".pdf";
-/* 已傳回事務所時，「下載」是一般網址（LINE 內建瀏覽器也打得開）；還沒傳成功時才用本機檔案下載 */
-$("btnPdf").onclick = e => {
-  if ($("btnPdf").getAttribute("href") !== "#") return;
-  e.preventDefault();
-  if (signedBytes) saveBlob(new Blob([signedBytes], { type: "application/pdf" }), fileName());
-};
-$("lineTip").hidden = !/\bLine\//i.test(navigator.userAgent);
-try {
-  const probe = new File([new Uint8Array(8)], "a.pdf", { type: "application/pdf" });
-  $("btnShare").hidden = !(navigator.canShare && navigator.canShare({ files: [probe] }));
-} catch {}
-$("btnShare").onclick = async () => {
-  try { await navigator.share({ files: [new File([signedBytes], fileName(), { type: "application/pdf" })], title: C.title }); }
-  catch (e) { if (e && e.name !== "AbortError") toast("無法分享，請改用下載"); }
-};
 
 boot();
