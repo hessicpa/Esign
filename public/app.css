@@ -134,3 +134,6 @@ button.small[aria-pressed="true"]{background:var(--date);border-color:var(--date
 .badge.wait{background:var(--paper);color:var(--muted);border:1px solid var(--line)}
 .topline{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 a.plain{color:inherit}
+a.btnlink.seal{background:var(--seal);color:#fff}
+a.btnlink.seal:focus-visible{outline-color:color-mix(in srgb,var(--seal) 45%,transparent)}
+.status.big{font-size:16px;padding:12px 14px}

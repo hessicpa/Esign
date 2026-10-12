@@ -18,9 +18,9 @@ export function json(obj, status = 200, extra = {}) {
   });
 }
 
-export function pdfResponse(buf, filename) {
+export function pdfResponse(buf, filename, disposition = "attachment") {
   const headers = { "content-type": "application/pdf", "cache-control": "no-store" };
-  if (filename) headers["content-disposition"] = `attachment; filename="file.pdf"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  if (filename) headers["content-disposition"] = `${disposition}; filename="signed.pdf"; filename*=UTF-8''${encodeURIComponent(filename)}`;
   return new Response(buf, { headers });
 }
 

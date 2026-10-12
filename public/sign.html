@@ -23,7 +23,7 @@
     <h1 id="docTitle"></h1>
     <ol class="steps" id="steps"><li data-s="read">閱讀內容</li><li data-s="agree">勾選同意</li><li data-s="sign">手寫簽名</li><li data-s="done">傳回事務所</li></ol>
     <p class="hint" id="hint"></p>
-    <p class="notice" id="signedBefore" hidden></p>
+    <p class="status ok big" id="signedBanner" hidden></p>
   </header>
   <div id="pages"></div>
   <section class="qcard" id="qSection" hidden>
@@ -46,9 +46,10 @@
   </div>
   <div class="in" id="barDone" hidden>
     <div class="btns">
-      <button class="primary" id="btnPdf">下載已簽 PDF</button>
+      <a class="btnlink seal" id="btnPdf" href="#" target="_blank" rel="noopener">下載已簽 PDF</a>
       <button id="btnShare" hidden>分享 PDF</button>
     </div>
+    <p class="small" id="lineTip" hidden>如果在 LINE 裡按下載沒有反應：點右上角「⋯」→「用預設瀏覽器開啟」，再按一次下載。</p>
     <div class="btns"><button id="btnRedo">重新簽名</button></div>
   </div>
 </div>

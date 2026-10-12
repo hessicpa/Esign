@@ -34,12 +34,9 @@ async function boot(){
   $("firm").textContent = C.firm || "";
   $("docTitle").textContent = C.title;
   $("previewBar").hidden = !PREVIEW;
-  if (C.signedAt && !PREVIEW){
-    $("signedBefore").hidden = false;
-    $("signedBefore").textContent = `這份文件已於 ${fmtDateTime(new Date(C.signedAt))} 簽署並傳回事務所。如果需要修改，可以重新簽一次，事務所會收到新的版本。`;
-  }
   renderQuestions(); renderContacts();
   show("viewClient");
+  if (C.signedAt && !PREVIEW && await showSignedView()) return;
   $("pages").innerHTML = '<div class="loading">文件載入中…</div>';
   try {
     const r = await renderPages(C.pdfBytes, true);
@@ -49,6 +46,32 @@ async function boot(){
       : `請往下閱讀全部內容，第 ${C.sig.page + 1} 頁有紅框簽名處。`;
     setStep("read");
   } catch (e) { console.error(e); $("pages").innerHTML = '<div class="loading">文件無法顯示，請重新整理頁面。</div>'; }
+}
+
+const zhDateTime = d => `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+const signedUrl = () => `/api/c?c=${encodeURIComponent(CID)}&f=signed&t=${encodeURIComponent(C.signedAt || "")}`;
+function setBanner(){
+  $("signedBanner").hidden = !C.signedAt;
+  if (C.signedAt) $("signedBanner").textContent = `✓ ${zhDateTime(new Date(C.signedAt))} 已簽署，回傳事務所完成`;
+}
+
+/* 已經簽過的人再打開連結：直接顯示簽好的那份、簽署時間，可下載；需要時可重新簽署 */
+async function showSignedView(){
+  try {
+    const r = await fetch(signedUrl());
+    if (!r.ok) return false;
+    signedBytes = new Uint8Array(await r.arrayBuffer());
+    await renderPages(signedBytes, false);
+  } catch (e) { console.error(e); return false; }
+  setBanner();
+  $("hint").textContent = "以下是你簽好的文件。如需修改，可以按「重新簽署」，事務所會收到新的版本。";
+  $("qSection").hidden = true;
+  $("barSign").hidden = true; $("barDone").hidden = false;
+  $("done").hidden = true;
+  $("btnRedo").textContent = "重新簽署";
+  $("btnPdf").href = signedUrl();
+  setStep("done");
+  return true;
 }
 
 function renderContacts(){
@@ -285,7 +308,11 @@ async function upload(){
     const r = await fetch(`/api/c?c=${encodeURIComponent(CID)}&f=signed`, { method: "POST", headers: { "content-type": "application/pdf" }, body: signedBytes });
     if (r.status === 413) return setUp("big");
     if (!r.ok) throw new Error(r.status);
-    setUp("ok"); setStep("done");
+    const res = await r.json();
+    C.signedAt = res.signedAt;
+    $("btnPdf").href = signedUrl();
+    setUp("ok"); setStep("done"); setBanner();
+    $("upStatus").textContent = `✓ ${zhDateTime(new Date(C.signedAt))} 已簽署，回傳事務所完成，不需要再另外傳送。`;
   } catch (e) { console.error(e); setUp("fail"); }
 }
 $("btnRetry").onclick = upload;
@@ -305,15 +332,25 @@ $("padOk").onclick = async () => {
   finally { $("padOk").textContent = "確認簽名"; $("padOk").disabled = strokes.length === 0; }
 };
 $("btnRedo").onclick = async () => {
-  signedBytes = null; strokes = []; $("done").hidden = true; $("barDone").hidden = true; $("barSign").hidden = false;
+  signedBytes = null; strokes = [];
+  $("done").hidden = true; $("barDone").hidden = true; $("barSign").hidden = false; $("signedBanner").hidden = true;
+  $("btnPdf").href = "#";
+  $("qSection").hidden = !C.questions.length;
   lockQuestions(false);
   $("hint").textContent = "可以修改勾選內容後重新簽名，簽完會再傳一次給事務所。";
-  await renderPages(C.pdfBytes, true);
+  const r = await renderPages(C.pdfBytes, true);
+  origPdf = r.doc;
   setStep($("agree").checked ? "sign" : "agree");
 };
 
 const fileName = () => [cleanName(C.name), cleanName(C.title) || "文件"].filter(Boolean).join("_") + ".pdf";
-$("btnPdf").onclick = () => saveBlob(new Blob([signedBytes], { type: "application/pdf" }), fileName());
+/* 已傳回事務所時，「下載」是一般網址（LINE 內建瀏覽器也打得開）；還沒傳成功時才用本機檔案下載 */
+$("btnPdf").onclick = e => {
+  if ($("btnPdf").getAttribute("href") !== "#") return;
+  e.preventDefault();
+  if (signedBytes) saveBlob(new Blob([signedBytes], { type: "application/pdf" }), fileName());
+};
+$("lineTip").hidden = !/\bLine\//i.test(navigator.userAgent);
 try {
   const probe = new File([new Uint8Array(8)], "a.pdf", { type: "application/pdf" });
   $("btnShare").hidden = !(navigator.canShare && navigator.canShare({ files: [probe] }));

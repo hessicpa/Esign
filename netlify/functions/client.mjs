@@ -26,6 +26,14 @@ export default async (req) => {
     return buf ? pdfResponse(buf) : json({ error: "not_found" }, 404);
   }
 
+  // 客戶自己簽好的那份：用一般網址開啟，LINE 內建瀏覽器、iPhone、Android 都能看/存
+  if (req.method === "GET" && f === "signed") {
+    const buf = await s.get(`signed/${id}`, { type: "arrayBuffer" });
+    if (!buf) return json({ error: "not_found" }, 404);
+    const name = `${meta.name}_${meta.title}.pdf`.replace(/[\\/:*?"<>|]/g, "");
+    return pdfResponse(buf, name, url.searchParams.get("dl") === "1" ? "attachment" : "inline");
+  }
+
   if (req.method === "POST" && f === "signed") {
     const len = Number(req.headers.get("content-length") || 0);
     if (len > MAX_SIGNED) return json({ error: "too_large" }, 413);

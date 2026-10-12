@@ -106,7 +106,7 @@ $("btnSaveSettings").onclick = async () => {
 const ED = { bytes: null, doc: null, page: 0, vw: 0, vh: 0, sig: null, date: null, mode: "sig", scale: 1, questions: [] };
 function resetEditor(){
   Object.assign(ED, { bytes: null, doc: null, page: 0, sig: null, date: null, mode: "sig", questions: [] });
-  $("fName").value = ""; $("fTitle").value = ""; $("fFile").value = ""; $("fDate").checked = true; $("fSummary").checked = true;
+  $("fName").value = ""; $("fTitle").value = ""; $("fFile").value = ""; $("fDate").checked = true; $("fSummary").checked = false;
   $("placeTools").hidden = true; $("btnSave").disabled = true; err("fileErr",""); err("saveErr","");
   updateFnPreview(); renderQEd(); setMode("sig");
 }
@@ -279,7 +279,9 @@ $("btnSave").onclick = async () => {
   }
   const summary = $("fSummary").checked;
   if (questions.length && !summary && questions.some(q => q.options.some(o => !o.mark))){
-    err("saveErr", "有選項沒有標位置，又沒有加「勾選結果」頁，客戶的答案會不見。請標位置，或勾選加一頁勾選結果。"); return;
+    const qi = questions.findIndex(q => q.options.some(o => !o.mark));
+    const oi = questions[qi].options.findIndex(o => !o.mark);
+    err("saveErr", `第 ${qi + 1} 題的「${questions[qi].options[oi].t}」還沒標位置。請按「在 PDF 上標位置」點在方框上，不然客戶勾了也不會出現在 PDF 上。`); return;
   }
   const meta = { name, title, sig: { page: ED.sig.page, x: r(ED.sig.x), y: r(ED.sig.y), w: r(ED.sig.w), h: r(ED.sig.h) },
     date: ED.date ? { page: ED.date.page, x: r(ED.date.x), y: r(ED.date.y) } : null, questions, summary };
