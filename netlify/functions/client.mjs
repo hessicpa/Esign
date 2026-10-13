@@ -4,7 +4,23 @@ import { store, json, pdfResponse, isPdf, ID_RE, MAX_SIGNED, canResign, ixKey, p
    GET  /api/c?c=<id>              合約資訊（標題、簽名位置、題目、簽署狀態）
    GET  /api/c?c=<id>&f=pdf        原始 PDF
    GET  /api/c?c=<id>&f=signed     客戶自己簽好的 PDF
+   POST /api/c?c=<id>&f=answers    提交前先存這次的答案（開放重簽時會自動帶入，客戶只要改需要更正的題目）
    POST /api/c?c=<id>&f=signed     提交簽好的 PDF（傳回事務所後鎖定，除非後台開放重簽） */
+
+/* 只留下與題目對得上的答案：填寫題是字串；勾選題是 { s: 勾選的選項, f: { 選項序號: 附帶填寫的內容 } } */
+function cleanAnswers(raw, questions) {
+  if (!Array.isArray(raw)) return null;
+  const str = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : "");
+  return (questions || []).map((q, i) => {
+    const a = raw[i];
+    if (q.type === "text" || q.type === "number") return str(a, q.type === "number" ? 24 : 100);
+    const sel = (a && Array.isArray(a.s) ? a.s : []).filter(j => Number.isInteger(j) && j >= 0 && j < q.options.length);
+    const s = q.multi ? [...new Set(sel)] : sel.slice(0, 1);
+    const f = {};
+    for (const j of s) if (q.options[j].input && a.f) { const v = str(a.f[j], 100); if (v) f[j] = v; }
+    return { s, f };
+  });
+}
 export default async (req) => {
   const url = new URL(req.url);
   const id = url.searchParams.get("c") || "";
@@ -17,8 +33,9 @@ export default async (req) => {
 
   if (req.method === "GET" && f === "meta") {
     const settings = (await s.get("settings.json", { type: "json" })) || {};
-    const { name, title, sig, date, nameAt, questions, summary, signedAt } = meta;
+    const { name, title, sig, date, nameAt, questions, summary, signedAt, answers } = meta;
     return json({ name, title, sig, date, nameAt: nameAt || null, questions: questions || [], summary, signedAt: signedAt || null,
+      answers: signedAt && answers ? answers : null,
       canResign: canResign(meta), firm: settings.firm || "" });
   }
 
@@ -32,6 +49,16 @@ export default async (req) => {
     if (!buf) return json({ error: "not_found" }, 404);
     const name = `${meta.name}_${meta.title}.pdf`.replace(/[\\/:*?"<>|]/g, "");
     return pdfResponse(buf, name, url.searchParams.get("dl") === "1" ? "attachment" : "inline");
+  }
+
+  if (req.method === "POST" && f === "answers") {
+    if (!canResign(meta)) return json({ error: "locked" }, 423);
+    let body; try { body = await req.json(); } catch { return json({ error: "bad_request" }, 400); }
+    const answers = cleanAnswers(body && body.answers, meta.questions);
+    if (!answers) return json({ error: "bad_request" }, 400);
+    meta.answers = answers;
+    await s.setJSON(`contracts/${id}.json`, meta);
+    return json({ ok: true });
   }
 
   if (req.method === "POST" && f === "signed") {

@@ -212,6 +212,16 @@ function renderQuestions(){
       }
     });
     box.append(fs);
+    // 開放重簽：帶入上次提交的答案，客戶只要更正需要修改的題目
+    const prev = C.answers && C.answers[i];
+    if (prev != null){
+      if (isText(q)) $(`q${i}t`).value = typeof prev === "string" ? prev : "";
+      else {
+        for (const j of prev.s || []) { const b = $(`q${i}o${j}`); if (b) b.checked = true; }
+        for (const [j, v] of Object.entries(prev.f || {})) { const f = $(`q${i}o${j}f`); if (f) f.value = v; }
+        syncFills();
+      }
+    }
   });
 }
 const isText = q => q.type === "text" || q.type === "number";
@@ -226,6 +236,12 @@ const optFill = (i, j) => {
   const o = C.questions[i].options[j], f = $(`q${i}o${j}f`);
   if (!o.input || !f || !$(`q${i}o${j}`).checked) return "";
   const v = f.value.trim(); return o.input === "number" ? halfWidth(v).replace(/\s+/g, "") : v;
+};
+/* 要存回事務所的答案（開放重簽時用來自動帶入） */
+const answersPayload = () => {
+  const ans = answers();
+  return C.questions.map((q, i) => isText(q) ? ans[i]
+    : { s: ans[i], f: Object.fromEntries(ans[i].filter(j => q.options[j].input).map(j => [j, optFill(i, j)])) });
 };
 const NUM_RE = /^[-+]?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/;
 const lockQuestions = b => document.querySelectorAll("#qList fieldset").forEach(f => f.disabled = b);
@@ -417,6 +433,13 @@ async function upload(){
   if (PREVIEW){ setUp("preview"); return; }
   setUp("sending");
   try {
+    if (C.questions.length){
+      const payload = answersPayload();
+      try {
+        await fetch(`/api/c?c=${encodeURIComponent(CID)}&f=answers`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ answers: payload }) });
+        C.answers = payload;
+      } catch {}   // 存答案失敗不影響提交
+    }
     const r = await fetch(`/api/c?c=${encodeURIComponent(CID)}&f=signed`, { method: "POST", headers: { "content-type": "application/pdf" }, body: signedBytes });
     if (r.status === 413) return setUp("big");
     if (r.status === 423){
@@ -482,7 +505,9 @@ $("btnRedo").onclick = async () => {
   $("done").hidden = true; $("barDone").hidden = true; $("barReview").hidden = true; $("barSign").hidden = false; $("signedBanner").hidden = true;
   $("qSection").hidden = !C.questions.length;
   lockQuestions(false);
-  $("hint").textContent = "可以修改勾選內容後重新簽名，提交後會取代先前的版本。";
+  $("hint").textContent = C.questions.length && C.answers
+    ? "已帶入您上次填寫的答案，只要更正需要修改的題目，再重新簽名即可。提交後會取代先前的版本。"
+    : "可以修改勾選內容後重新簽名，提交後會取代先前的版本。";
   const r = await renderPages(C.pdfBytes, true);
   origPdf = r.doc;
   setStep($("agree").checked ? "sign" : "agree");
