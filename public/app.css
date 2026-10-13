@@ -137,6 +137,9 @@ a.plain{color:inherit}
 a.btnlink.seal{background:var(--seal);color:#fff}
 a.btnlink.seal:focus-visible{outline-color:color-mix(in srgb,var(--seal) 45%,transparent)}
 .status.big{font-size:16px;padding:12px 14px}
-.doc-logo{display:block;margin-bottom:10px}
-.doc-logo img{width:150px;display:block}
+.brandbar{display:flex;align-items:center;gap:12px;padding-bottom:12px;margin-bottom:6px;border-bottom:1px solid var(--line);min-width:0}
+.doc-logo{display:block;flex:none}
+.doc-logo img{width:84px;display:block}
+.brand-title{font-size:14px;font-weight:500;letter-spacing:.06em;color:var(--ink);padding-left:12px;border-left:1px solid var(--line);line-height:1.4;min-width:0}
+.brand-title .sep{color:var(--muted);margin:0 .45em;font-weight:400}
 .review-tip{margin:0}

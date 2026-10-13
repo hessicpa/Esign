@@ -14,7 +14,9 @@ import { store, json, pdfResponse, isPdf, cleanMeta, cleanClient, clientKey, map
    ?a=reopen&c=&on=1|0 (POST)    開放／取消開放重簽
    ?a=clients       (GET/POST)   客戶名單
    ?a=presets       (GET/POST)   設定範本（簽名框、日期、題目）；POST 帶 { preset } 新增或覆蓋，帶 { deleteId } 刪除
-   ?a=settings      (POST)       事務所名稱 */
+   ?a=settings      (POST)       事務所名稱
+   ?a=logs                       登入紀錄（最近 500 筆）
+   ?a=usage                      使用空間統計 */
 const sha = s => createHash("sha256").update(String(s)).digest();
 function authorized(req) {
   const pw = process.env.ADMIN_PASSWORD || "";
@@ -43,6 +45,20 @@ async function ensureIndex(s) {
   await s.set("ixv1", "1");
 }
 
+/* 登入紀錄：時間、成功或失敗、IP、大概位置、瀏覽器，以及使用者自己設定的電腦名稱 */
+async function logLogin(s, req, context, ok) {
+  const g = (context && context.geo) || {};
+  const loc = [g.city, g.subdivision && g.subdivision.name, g.country && g.country.name].filter(Boolean).join(", ");
+  let device = "";
+  try { device = decodeURIComponent(req.headers.get("x-device") || "").trim().slice(0, 40); } catch {}
+  const entry = { at: new Date().toISOString(), ok, ip: (context && context.ip) || req.headers.get("x-nf-client-connection-ip") || "",
+    loc, ua: (req.headers.get("user-agent") || "").slice(0, 300), device };
+  const list = (await s.get("loginlog.json", { type: "json" })) || [];
+  list.unshift(entry);
+  await s.setJSON("loginlog.json", list.slice(0, 500));
+}
+const blobSize = async (s, key) => { const b = await s.get(key, { type: "arrayBuffer" }); return b ? b.byteLength : 0; };
+
 async function newContract(s, base, client, pdfKey) {
   const id = newId();
   const rec = { id, ...base, name: client.name, short: client.short, taxId: client.taxId, code: client.code || "",
@@ -52,18 +68,54 @@ async function newContract(s, base, client, pdfKey) {
   return rec;
 }
 
-export default async (req) => {
+export default async (req, context) => {
   if (!process.env.ADMIN_PASSWORD) return json({ error: "no_password_set" }, 503);
-  if (!authorized(req)) {
-    await new Promise(r => setTimeout(r, 400));   // 放慢猜密碼
-    return json({ error: "unauthorized" }, 401);
-  }
   const url = new URL(req.url);
   const a = url.searchParams.get("a");
   const id = url.searchParams.get("c") || "";
   const s = store();
+  const isLogin = a === "ping" && url.searchParams.get("login") === "1";
+  if (!authorized(req)) {
+    if (isLogin) { try { await logLogin(s, req, context, false); } catch {} }
+    await new Promise(r => setTimeout(r, 400));   // 放慢猜密碼
+    return json({ error: "unauthorized" }, 401);
+  }
 
-  if (a === "ping") return json({ ok: true });
+  if (a === "ping") {
+    if (isLogin) { try { await logLogin(s, req, context, true); } catch {} }
+    return json({ ok: true });
+  }
+
+  if (a === "logs" && req.method === "GET") {
+    return json({ logs: (await s.get("loginlog.json", { type: "json" })) || [] });
+  }
+
+  /* 使用空間：合約設定裡記著各檔案大小；舊合約沒有記錄的，第一次統計時量一次並補上 */
+  if (a === "usage" && req.method === "GET") {
+    const { blobs } = await s.list({ prefix: "contracts/" });
+    const metas = (await mapLimit(blobs, 20, b => s.get(b.key, { type: "json" }))).filter(Boolean);
+    let own = 0, signed = 0, signedCount = 0;
+    const tplKeys = new Set();
+    await mapLimit(metas, 10, async m => {
+      let dirty = false;
+      if (m.pdfKey) tplKeys.add(m.pdfKey);
+      else { if (m.pdfSize == null) { m.pdfSize = await blobSize(s, `pdf/${m.id}`); dirty = true; } own += m.pdfSize; }
+      if (m.signedAt) {
+        signedCount++;
+        if (m.signedSize == null) { m.signedSize = await blobSize(s, `signed/${m.id}`); dirty = true; }
+        signed += m.signedSize;
+      }
+      if (dirty) await s.setJSON(`contracts/${m.id}.json`, m);
+    });
+    const sizes = (await s.get("tplsizes.json", { type: "json" })) || {};
+    let tpl = 0, tplDirty = false;
+    for (const k of tplKeys) { if (sizes[k] == null) { sizes[k] = await blobSize(s, k); tplDirty = true; } tpl += sizes[k]; }
+    if (tplDirty) await s.setJSON("tplsizes.json", sizes);
+    const clients = (await s.get("clients.json", { type: "json" })) || [];
+    const presets = (await s.get("presets.json", { type: "json" })) || [];
+    return json({ contracts: metas.length, signedCount, own, tpl, tplCount: tplKeys.size, signed,
+      total: own + tpl + signed, clients: clients.length, presets: presets.length, at: new Date().toISOString() });
+  }
 
   if (a === "counts" && req.method === "GET") {
     await ensureIndex(s);
@@ -103,7 +155,7 @@ export default async (req) => {
     if (buf.byteLength > MAX_PDF) return json({ error: "too_large" }, 413);
     if (!isPdf(buf)) return json({ error: "not_pdf" }, 400);
     const { name, short, taxId, code, ...base } = meta;
-    const rec = await newContract(s, base, { name, short, taxId, code }, null);
+    const rec = await newContract(s, { ...base, pdfSize: buf.byteLength }, { name, short, taxId, code }, null);
     await s.set(`pdf/${rec.id}`, buf);
     return json({ ok: true, contract: rec });
   }
@@ -118,6 +170,9 @@ export default async (req) => {
     if (!isPdf(buf)) return json({ error: "not_pdf" }, 400);
     const tplId = newId();
     await s.set(`tpl/${tplId}`, buf);
+    const sizes = (await s.get("tplsizes.json", { type: "json" })) || {};
+    sizes[`tpl/${tplId}`] = buf.byteLength;
+    await s.setJSON("tplsizes.json", sizes);
     return json({ ok: true, tplId });
   }
 

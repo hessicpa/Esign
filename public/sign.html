@@ -20,10 +20,13 @@
 <div class="wrap" id="viewClient" hidden>
   <div class="preview-bar" id="previewBar" hidden><span>預覽模式：簽名不會傳回事務所</span></div>
   <header>
-    <picture class="doc-logo">
-      <source srcset="logo-white.png" media="(prefers-color-scheme: dark)">
-      <img src="logo.png" alt="禾識會計師事務所">
-    </picture>
+    <div class="brandbar">
+      <picture class="doc-logo">
+        <source srcset="logo-white.png" media="(prefers-color-scheme: dark)">
+        <img src="logo.png" alt="禾識會計師事務所">
+      </picture>
+      <div class="brand-title">禾識會計師事務所<span class="sep" aria-hidden="true">|</span>電子簽署系統</div>
+    </div>
     <div class="firm" id="firm" hidden></div>
     <h1 id="docTitle"></h1>
     <ol class="steps" id="steps"><li data-s="read">閱讀內容</li><li data-s="agree">勾選同意</li><li data-s="sign">手寫簽名</li><li data-s="done">傳回事務所</li></ol>

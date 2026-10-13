@@ -47,6 +47,7 @@ export default async (req) => {
     meta.resignAllowed = false;   // 提交後鎖定
     meta.signedAt = now;
     meta.signCount = (meta.signCount || 0) + 1;
+    meta.signedSize = buf.byteLength;
     await s.setJSON(`contracts/${id}.json`, meta);
     if (firstTime) {   // 清單索引：從「尚未簽核」移到「已簽核完成」
       await s.set(ixKey(meta, true), "1");

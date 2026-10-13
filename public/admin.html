@@ -19,6 +19,7 @@
     <img class="login-logo" src="logo.png" alt="禾識會計師事務所">
     <div class="login-title">電子文件簽署系統</div>
     <label class="field" for="pwIn">管理密碼<input id="pwIn" type="password" autocomplete="current-password"></label>
+    <label class="field" for="devIn">這台電腦名稱（選填，例如 HESSICPA01；會記在這台電腦上）<input id="devIn" maxlength="40" autocomplete="off"></label>
     <p class="err" id="loginErr" hidden></p>
     <div class="btns"><button class="primary ink" id="btnLogin">登入管理後台</button></div>
     <p class="small">密碼是在 Netlify 設定的 ADMIN_PASSWORD。</p>
@@ -234,13 +235,40 @@
     <!-- ===== 系統設定 ===== -->
     <section id="viewSettings" hidden>
       <div class="pagehead"><span class="tone-bar" style="--tone:var(--tone-ink)"></span><h2>系統設定</h2></div>
-      <div class="panel">
-        <div class="panel-h"><h3>事務所資訊</h3></div>
-        <div class="panel-b">
-          <label class="field" for="sFirm">事務所名稱（顯示在客戶簽署頁上方）<input id="sFirm"></label>
-          <p class="err" id="setErr" hidden></p>
-          <div class="btns"><button class="primary ink" id="btnSaveSettings">儲存</button></div>
+      <div class="settings-grid">
+        <div class="panel">
+          <div class="panel-h"><h3>事務所資訊</h3></div>
+          <div class="panel-b">
+            <label class="field" for="sFirm">事務所名稱（顯示在客戶簽署頁上方）<input id="sFirm"></label>
+            <label class="field" for="sDevice">這台電腦名稱（登入紀錄會顯示）<input id="sDevice" maxlength="40" placeholder="例如 HESSICPA01"></label>
+            <p class="err" id="setErr" hidden></p>
+            <div class="btns"><button class="primary ink" id="btnSaveSettings">儲存</button></div>
+          </div>
         </div>
+        <div class="panel">
+          <div class="panel-h"><h3>使用空間</h3><button class="small" id="btnUsage">重新計算</button></div>
+          <div class="panel-b">
+            <div class="usage-total"><b id="uTotal">—</b><span id="uTotalSub">按「重新計算」統計目前使用量</span></div>
+            <div class="usage-bar" aria-hidden="true"><i id="uBarOwn"></i><i id="uBarTpl"></i><i id="uBarSigned"></i></div>
+            <dl class="usage-list">
+              <div><dt><span class="sw own"></span>單一客戶原始 PDF</dt><dd id="uOwn">—</dd></div>
+              <div><dt><span class="sw tpl"></span>公版 PDF</dt><dd id="uTpl">—</dd></div>
+              <div><dt><span class="sw signed"></span>客戶已簽 PDF</dt><dd id="uSigned">—</dd></div>
+              <div><dt>合約份數</dt><dd id="uCount">—</dd></div>
+              <div><dt>客戶名單／設定範本</dt><dd id="uMisc">—</dd></div>
+            </dl>
+            <p class="small">Netlify 點數用量（部署、流量）請到 Netlify 的 Usage &amp; billing 查看。</p>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-h">
+          <h3>登入紀錄</h3>
+          <div class="btns"><label class="ck-inline"><input type="checkbox" id="logFailOnly"> 只看登入失敗</label><button class="small" id="btnLogs">重新整理</button></div>
+        </div>
+        <div class="rowhead row lrow"><span>時間</span><span>結果</span><span>電腦名稱</span><span>瀏覽器／系統</span><span>位置</span><span>IP</span></div>
+        <div class="rows" id="logRows"><div class="empty">讀取中…</div></div>
+        <div class="btns more" id="logMoreWrap" hidden><button class="small" id="logMore">顯示更多</button></div>
       </div>
       <div class="panel">
         <div class="panel-h"><h3>使用須知</h3></div>
@@ -251,6 +279,7 @@
             <li>客戶名單的「年度狀態」決定公版批次時預設列出哪些客戶：只列出該合約年度為「存續」的客戶。</li>
             <li>網站每次更新部署會使用 Netlify 點數，功能調整請集中一次上傳。</li>
             <li>已簽檔案下載存檔後，可刪除舊年度合約以節省空間；刪除後該連結即失效。</li>
+            <li>登入紀錄的位置是依 IP 推估的大概城市；電腦名稱是每台電腦自行填寫，網頁無法自動讀取電腦名稱。</li>
           </ul>
         </div>
       </div>

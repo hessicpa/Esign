@@ -17,6 +17,7 @@ let VIEW = null, CAT = null, ROWS = [], HIGHLIGHT = new Set();
 
 async function api(a, { method = "GET", body, query = "" } = {}){
   const headers = { "x-admin-key": KEY };
+  const dev = deviceName(); if (dev) headers["x-device"] = encodeURIComponent(dev);
   if (body && !(body instanceof FormData)) headers["content-type"] = "application/json";
   const r = await fetch(`/api/admin?a=${a}${query}`, { method, headers, body });
   if (r.status === 401){ logout("密碼不對，請重新輸入。"); throw new Error("unauthorized"); }
@@ -24,6 +25,11 @@ async function api(a, { method = "GET", body, query = "" } = {}){
   return r;
 }
 const quiet = e => e && (e.message === "unauthorized" || e.message === "no_password");
+
+/* ---------- 這台電腦的名稱（網頁讀不到電腦名稱，由使用者填寫並記在這台電腦） ---------- */
+function deviceName(){ try { return localStorage.getItem("esign.device") || ""; } catch { return ""; } }
+function setDeviceName(v){ try { if (v) localStorage.setItem("esign.device", v); else localStorage.removeItem("esign.device"); } catch {} }
+$("devIn").value = deviceName();
 
 /* ---------- 登入 ---------- */
 function logout(msg){
@@ -35,7 +41,8 @@ async function login(){
   KEY = $("pwIn").value; err("loginErr", "");
   if (!KEY) return err("loginErr", "請輸入密碼。");
   $("btnLogin").disabled = true;
-  try { const r = await api("ping"); if (r.ok){ ss.set("esign.key", KEY); $("pwIn").value = ""; await enter(); } }
+  setDeviceName($("devIn").value.trim());
+  try { const r = await api("ping", { query: "&login=1" }); if (r.ok){ ss.set("esign.key", KEY); $("pwIn").value = ""; await enter(); } }
   catch (e) { if (!quiet(e)) err("loginErr", "連不上網站，請稍後再試。"); }
   finally { $("btnLogin").disabled = false; }
 }
@@ -116,6 +123,7 @@ function showView(v){
   $("viewCat").hidden = v !== "cat"; $("viewClients").hidden = v !== "clients"; $("viewSettings").hidden = v !== "settings";
   markNav();
   if (v === "clients") renderClients();
+  if (v === "settings"){ $("sDevice").value = deviceName(); loadLogs(); if (!USAGE) loadUsage(); }
   window.scrollTo(0, 0);
 }
 
@@ -990,12 +998,70 @@ $("importSave").onclick = async () => {
 $("btnSaveSettings").onclick = async () => {
   err("setErr", ""); $("btnSaveSettings").disabled = true;
   try {
+    setDeviceName($("sDevice").value.trim());
     const r = await api("settings", { method: "POST", body: JSON.stringify({ firm: $("sFirm").value }) });
     if (!r.ok) throw new Error(r.status);
     toast("已儲存"); await loadCounts();
   } catch (e) { if (!quiet(e)) err("setErr", "儲存失敗，請再試一次。"); }
   finally { $("btnSaveSettings").disabled = false; }
 };
+
+/* ---------- 使用空間 ---------- */
+let USAGE = null;
+const fmtBytes = n => n >= 1048576 ? (n / 1048576).toFixed(n >= 104857600 ? 0 : 1) + " MB" : Math.max(0, Math.round(n / 1024)) + " KB";
+async function loadUsage(){
+  $("btnUsage").disabled = true; $("uTotalSub").textContent = "計算中…（合約多時需要幾秒）";
+  try {
+    const r = await api("usage"); if (!r.ok) throw new Error(r.status);
+    const u = USAGE = await r.json();
+    $("uTotal").textContent = fmtBytes(u.total);
+    $("uTotalSub").textContent = `統計時間 ${fmtDateTime(new Date(u.at))}`;
+    $("uOwn").textContent = fmtBytes(u.own);
+    $("uTpl").textContent = `${fmtBytes(u.tpl)}（${u.tplCount} 份）`;
+    $("uSigned").textContent = `${fmtBytes(u.signed)}（${u.signedCount} 份）`;
+    $("uCount").textContent = `${u.contracts} 份（已簽 ${u.signedCount}、未簽 ${u.contracts - u.signedCount}）`;
+    $("uMisc").textContent = `${u.clients} 位／${u.presets} 個`;
+    const t = u.total || 1;
+    $("uBarOwn").style.width = (u.own / t * 100) + "%"; $("uBarTpl").style.width = (u.tpl / t * 100) + "%"; $("uBarSigned").style.width = (u.signed / t * 100) + "%";
+  } catch (e) { if (!quiet(e)) $("uTotalSub").textContent = "統計失敗，請再按一次「重新計算」。"; }
+  finally { $("btnUsage").disabled = false; }
+}
+$("btnUsage").onclick = loadUsage;
+
+/* ---------- 登入紀錄 ---------- */
+let LOGS = [], LOG_SHOW = 50;
+function uaText(ua){
+  const os = /Windows/.test(ua) ? "Windows" : /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "其他";
+  const br = /Edg\//.test(ua) ? "Edge" : /Line\//.test(ua) ? "LINE" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /FxiOS|Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "瀏覽器";
+  return `${br}／${os}`;
+}
+async function loadLogs(){
+  try { const r = await api("logs"); if (!r.ok) throw new Error(r.status); LOGS = (await r.json()).logs || []; }
+  catch (e) { if (!quiet(e)) { $("logRows").innerHTML = '<div class="empty">讀取登入紀錄失敗。</div>'; } return; }
+  renderLogs();
+}
+function renderLogs(){
+  const box = $("logRows"); box.innerHTML = "";
+  const list = $("logFailOnly").checked ? LOGS.filter(l => !l.ok) : LOGS;
+  if (!list.length){ box.innerHTML = '<div class="empty">還沒有紀錄。</div>'; $("logMoreWrap").hidden = true; return; }
+  for (const l of list.slice(0, LOG_SHOW)){
+    const row = document.createElement("div"); row.className = "row lrow";
+    const cells = [
+      ["t", fmtDateTime(new Date(l.at))],
+      ["res " + (l.ok ? "ok" : "bad"), l.ok ? "成功" : "密碼錯誤"],
+      ["", l.device || "（未填）"],
+      ["", uaText(l.ua || "")],
+      ["", l.loc || "—"],
+      ["ip", l.ip || "—"],
+    ];
+    for (const [cls, text] of cells){ const d = document.createElement(cls.startsWith("res") ? "span" : "div"); if (cls) d.className = cls; d.textContent = text; if (cls === "") d.title = text; row.append(d); }
+    box.append(row);
+  }
+  $("logMoreWrap").hidden = list.length <= LOG_SHOW;
+}
+$("logFailOnly").onchange = () => { LOG_SHOW = 50; renderLogs(); };
+$("logMore").onclick = () => { LOG_SHOW += 100; renderLogs(); };
+$("btnLogs").onclick = loadLogs;
 
 /* 回到這個分頁時更新簽核狀態 */
 document.addEventListener("visibilitychange", () => {
