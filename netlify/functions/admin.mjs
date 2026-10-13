@@ -252,7 +252,7 @@ export default async (req, context) => {
         let m;
         try { m = cleanMeta({ ...p, name: "範本", title: p.title || name }); } catch { return json({ error: "bad_meta" }, 400); }
         const rec = { id: ID_RE.test(p.id || "") ? p.id : newId(), name, category: m.category, title: typeof p.title === "string" ? p.title.trim().slice(0, 200) : "",
-          sig: m.sig, sigLast: !!p.sigLast, date: m.date, dateLast: !!p.dateLast, questions: m.questions, summary: m.summary,
+          sig: m.sig, sigLast: !!p.sigLast, date: m.date, dateLast: !!p.dateLast, nameAt: m.nameAt, nameLast: !!p.nameLast, questions: m.questions, summary: m.summary,
           updated: new Date().toISOString() };
         next = list.filter(x => x.id !== rec.id && !(x.name === rec.name && x.category === rec.category));
         next.unshift(rec);

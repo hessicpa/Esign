@@ -323,10 +323,10 @@ function setNewMode(m){
   updateSaveLabel(); updateFnPreview();
 }
 function resetEditor(){
-  Object.assign(ED, { bytes: null, doc: null, page: 0, sig: null, date: null, mode: "sig", questions: [] });
+  Object.assign(ED, { bytes: null, doc: null, page: 0, sig: null, date: null, nameAt: null, mode: "sig", questions: [] });
   for (const id of ["fName", "fShort", "fTaxId", "fFile", "pickFilter"]) $(id).value = "";
   $("fTitle").value = catOf(CAT).label; $("fYear").value = THIS_YEAR;
-  $("fDate").checked = true; $("fSummary").checked = false;
+  $("fDate").checked = true; $("fSummary").checked = false; $("fNameOn").checked = false; $("fNameSize").value = "12";
   $("placeTools").hidden = true; $("btnSave").disabled = true; $("saveProgress").hidden = true;
   err("fileErr", ""); err("saveErr", "");
   PICKED = new Set(); renderQEd(); setMode("sig");
@@ -341,6 +341,7 @@ function updateSaveLabel(){
   $("btnSave").textContent = NEW_MODE === "batch" ? `產生 ${PICKED.size} 位客戶的連結` : "建立連結";
 }
 $("fTitle").addEventListener("input", updateFnPreview);
+$("fName").addEventListener("input", () => { if (ED.nameAt) drawMarks(); });
 $("fName").addEventListener("input", () => {
   updateFnPreview();
   const hit = CLIENTS.find(c => c.name === $("fName").value.trim());
@@ -389,21 +390,36 @@ function renderPick(){
   updatePickCount();
 }
 $("pickShowAll").onchange = renderPick;
-function updatePickCount(){ $("pickCount").textContent = `已選 ${PICKED.size} 位`; updateSaveLabel(); }
+function updatePickCount(){ $("pickCount").textContent = `已選 ${PICKED.size} 位`; updateSaveLabel(); if (ED.nameAt) drawMarks(); }
 $("pickFilter").addEventListener("input", renderPick);
 $("fYear").addEventListener("input", () => { if (NEW_MODE === "batch") renderPick(); });
 $("pickAll").onclick = () => { document.querySelectorAll("#pickList input").forEach(cb => { if (!cb.checked){ cb.checked = true; cb.onchange(); } }); };
 $("pickNone").onclick = () => { PICKED = new Set(); renderPick(); };
 
-const ED = { bytes: null, doc: null, page: 0, vw: 0, vh: 0, sig: null, date: null, mode: "sig", scale: 1, questions: [] };
+const ED = { bytes: null, doc: null, page: 0, vw: 0, vh: 0, sig: null, date: null, nameAt: null, mode: "sig", scale: 1, questions: [] };
 function setMode(m){
   ED.mode = m;
-  $("modeSig").setAttribute("aria-pressed", m === "sig"); $("modeDate").setAttribute("aria-pressed", m === "date");
+  $("modeSig").setAttribute("aria-pressed", m === "sig"); $("modeDate").setAttribute("aria-pressed", m === "date"); $("modeName").setAttribute("aria-pressed", m === "name");
   document.querySelectorAll("#qEd [data-mark]").forEach(b => b.setAttribute("aria-pressed", typeof m === "object" && b.dataset.mark === `${m.qi}-${m.oi}`));
 }
 $("modeSig").onclick = () => setMode("sig");
 $("modeDate").onclick = () => { if (!$("fDate").checked){ $("fDate").checked = true; ED.date = ED.date || defaultDate(); drawMarks(); } setMode("date"); };
 $("fDate").onchange = e => { if (e.target.checked){ ED.date = ED.date || defaultDate(); } else { ED.date = null; if (ED.mode === "date") setMode("sig"); } drawMarks(); };
+/* 客戶名稱：綠線是文字的起點（底線左端），每位客戶簽署時自動換成自己的完整名稱 */
+const nameSize = () => +$("fNameSize").value || 12;
+function defaultName(){ return { page: ED.page, x: Math.round(ED.vw * 0.18), y: 120, size: nameSize() }; }
+$("modeName").onclick = () => { if (!ED.doc) return; if (!$("fNameOn").checked){ $("fNameOn").checked = true; } ED.nameAt = ED.nameAt || defaultName(); drawMarks(); setMode("name"); };
+$("fNameOn").onchange = e => {
+  if (e.target.checked){ if (ED.doc){ ED.nameAt = ED.nameAt || defaultName(); setMode("name"); toast("請在 PDF 上點一下要填客戶名稱的位置（底線的左端）"); } }
+  else { ED.nameAt = null; if (ED.mode === "name") setMode("sig"); }
+  drawMarks();
+};
+$("fNameSize").onchange = () => { if (ED.nameAt){ ED.nameAt.size = nameSize(); drawMarks(); } };
+function sampleName(){
+  if (NEW_MODE === "single" && $("fName").value.trim()) return $("fName").value.trim();
+  if (NEW_MODE === "batch"){ const c = CLIENTS.find(c => PICKED.has(ckey(c))); if (c) return c.name; }
+  return "○○○○股份有限公司";
+}
 
 $("fFile").onchange = async e => {
   const f = e.target.files[0]; err("fileErr",""); $("placeTools").hidden = true; $("btnSave").disabled = true;
@@ -414,9 +430,9 @@ $("fFile").onchange = async e => {
     const enc = /encrypt/i.test(String(x && (x.name || x.message)));
     return err("fileErr", enc ? "這份 PDF 有密碼保護，請先移除保護再上傳。" : "讀不到這份 PDF，請確認檔案是否完整。");
   }
-  ED.bytes = bytes; ED.sig = null; ED.date = null;
+  ED.bytes = bytes; ED.sig = null; ED.date = null; ED.nameAt = null;
   ED.questions.forEach(q => q.options.forEach(o => o.mark = null));
-  ED.doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  ED.doc = await pdfjsLib.getDocument({ data: bytes.slice(), ...PDFJS_OPTS }).promise;
   const sel = $("fPage"); sel.innerHTML = "";
   for (let i = 1; i <= ED.doc.numPages; i++){ const o = document.createElement("option"); o.value = i - 1; o.textContent = `第 ${i} 頁` + (i === ED.doc.numPages ? "（最後一頁）" : ""); sel.append(o); }
   sel.value = ED.doc.numPages - 1;
@@ -444,6 +460,7 @@ async function loadPage(i){
     ED.sig = { page: i, x: Math.max(0, ED.vw - w - 60), y: Math.max(0, ED.vh - h - 150), w, h };
     ED.date = $("fDate").checked ? defaultDate() : null;
   }
+  if ($("fNameOn").checked && !ED.nameAt) ED.nameAt = defaultName();
   drawMarks();
 }
 function clampSig(){ const s = ED.sig; s.x = Math.min(Math.max(0, s.x), ED.vw - s.w); s.y = Math.min(Math.max(0, s.y), ED.vh - s.h); }
@@ -455,6 +472,9 @@ function drawMarks(){
   md.hidden = !ED.date || ED.date.page !== ED.page;
   md.textContent = fmtDate(new Date());
   if (ED.date) Object.assign(md.style, { left: ED.date.x*k+"px", top: ED.date.y*k+"px", fontSize: Math.max(9, 11*k)+"px" });
+  const mn = $("markName"), na = ED.nameAt;
+  mn.hidden = !na || na.page !== ED.page;
+  if (na){ mn.textContent = sampleName(); Object.assign(mn.style, { left: na.x*k+"px", top: na.y*k+"px", fontSize: na.size*k+"px" }); }
   document.querySelectorAll("#place .optm").forEach(n => n.remove());
   ED.questions.forEach((q, qi) => q.options.forEach((o, oi) => {
     if (!o.mark || o.mark.page !== ED.page) return;
@@ -465,6 +485,7 @@ function drawMarks(){
   }));
   const parts = [`紅框（簽名）在第 ${s.page + 1} 頁`];
   if (ED.date) parts.push(`藍線（日期）在第 ${ED.date.page + 1} 頁`);
+  if (ED.nameAt) parts.push(`綠線（客戶名稱）在第 ${ED.nameAt.page + 1} 頁`);
   $("placeStatus").textContent = parts.join("・") + "。切換「顯示第幾頁」可以到別頁放置。";
 }
 function placeAt(e){
@@ -473,6 +494,7 @@ function placeAt(e){
   const m = ED.mode;
   if (m === "sig"){ ED.sig.page = ED.page; ED.sig.x = px - ED.sig.w/2; ED.sig.y = py - ED.sig.h/2; clampSig(); }
   else if (m === "date"){ ED.date = { page: ED.page, x: Math.min(Math.max(0, px), ED.vw - 60), y: Math.min(Math.max(14, py), ED.vh - 2) }; }
+  else if (m === "name"){ ED.nameAt = { page: ED.page, x: Math.min(Math.max(0, px), ED.vw - 40), y: Math.min(Math.max(10, py), ED.vh - 2), size: nameSize() }; }
   else { const o = ED.questions[m.qi] && ED.questions[m.qi].options[m.oi]; if (!o) return; o.mark = { page: ED.page, x: Math.min(Math.max(6, px), ED.vw - 6), y: Math.min(Math.max(6, py), ED.vh - 6) }; updateMarkBtn(m.qi, m.oi); }
   drawMarks();
 }
@@ -581,6 +603,8 @@ async function applyPlacement(p){
   $("fW").value = ED.sig.w; $("fH").value = ED.sig.h;
   ED.date = p.date ? { ...p.date, page: p.dateLast ? last : map(p.date.page) } : null;
   $("fDate").checked = !!p.date;
+  ED.nameAt = p.nameAt ? { ...p.nameAt, page: p.nameLast ? last : map(p.nameAt.page) } : null;
+  $("fNameOn").checked = !!p.nameAt; if (p.nameAt) $("fNameSize").value = String(p.nameAt.size || 12);
   p.questions.forEach((pq, qi) => {
     const q = ED.questions[qi]; if (!q) return;
     pq.options.forEach((po, oi) => { const o = q.options[oi]; if (o) o.mark = po.mark ? { ...po.mark, page: map(po.mark.page) } : null; });
@@ -599,6 +623,7 @@ $("btnSavePreset").onclick = async () => {
   const preset = { id: (PRESETS.find(p => p.name === name && p.category === CAT) || {}).id, name, category: CAT, title: $("fTitle").value.trim(),
     sig: { page: ED.sig.page, x: r(ED.sig.x), y: r(ED.sig.y), w: r(ED.sig.w), h: r(ED.sig.h) }, sigLast: ED.sig.page === last,
     date: ED.date ? { page: ED.date.page, x: r(ED.date.x), y: r(ED.date.y) } : null, dateLast: !!ED.date && ED.date.page === last,
+    nameAt: nameMeta(), nameLast: !!ED.nameAt && ED.nameAt.page === last,
     questions, summary: $("fSummary").checked };
   $("btnSavePreset").disabled = true;
   try {
@@ -621,6 +646,7 @@ $("btnDelPreset").onclick = async () => {
   } catch (e) { if (!quiet(e)) toast("刪除失敗，請再試一次"); }
 };
 
+const nameMeta = () => ED.nameAt ? { page: ED.nameAt.page, x: Math.round(ED.nameAt.x * 10) / 10, y: Math.round(ED.nameAt.y * 10) / 10, size: ED.nameAt.size } : null;
 /* ---------- 建立連結 ---------- */
 function collectMeta(){
   const title = $("fTitle").value.trim(), year = +$("fYear").value;
@@ -648,7 +674,7 @@ function collectMeta(){
   }
   return { category: CAT, year, title, questions, summary,
     sig: { page: ED.sig.page, x: r(ED.sig.x), y: r(ED.sig.y), w: r(ED.sig.w), h: r(ED.sig.h) },
-    date: ED.date ? { page: ED.date.page, x: r(ED.date.x), y: r(ED.date.y) } : null };
+    date: ED.date ? { page: ED.date.page, x: r(ED.date.x), y: r(ED.date.y) } : null, nameAt: nameMeta() };
 }
 
 $("btnSave").onclick = async () => {

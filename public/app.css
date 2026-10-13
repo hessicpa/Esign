@@ -119,6 +119,7 @@ a.btnlink:focus-visible{outline:3px solid color-mix(in srgb,var(--ok) 45%,transp
 .qed .ck{display:flex;gap:4px;align-items:center;font-size:13.5px;color:var(--muted)}
 .qed .opts{display:grid;gap:6px;padding-left:12px;border-left:2px solid var(--line)}
 button.small[aria-pressed="true"]{background:var(--date);border-color:var(--date);color:var(--sheet)}
+.mark.cname{border-bottom:2px solid var(--ok);color:var(--ok);transform:translateY(-100%);white-space:nowrap;padding:0 2px;background:color-mix(in srgb,var(--ok) 10%,transparent);justify-content:flex-start}
 .mark.optm{width:18px;height:18px;margin:-9px 0 0 -9px;border:2px solid var(--date);border-radius:50%;color:var(--date);background:color-mix(in srgb,var(--date) 15%,transparent);font-size:11px}
 .mark.optm span{position:absolute;left:20px;top:-2px;white-space:nowrap;font-size:11px;background:var(--sheet);color:var(--date);padding:0 4px;border-radius:3px}
 @media (prefers-reduced-motion:reduce){.sigspot{animation:none}}

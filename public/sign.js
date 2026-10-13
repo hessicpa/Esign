@@ -39,6 +39,7 @@ async function boot(){
   if (C.signedAt && !PREVIEW && await showSignedView()) return;
   $("pages").innerHTML = '<div class="loading">文件載入中…</div>';
   try {
+    if (C.nameAt) await nameFontReady();
     const r = await renderPages(C.pdfBytes, true);
     origPdf = r.doc;
     $("hint").textContent = C.questions.length
@@ -101,8 +102,20 @@ async function sharePdfNow(){
 }
 $("btnShare").onclick = () => { if (signedBytes) sharePdfNow(); };
 
+/* ---------- 客戶名稱自動填入：用畫布寫字（中文不用另外嵌字型） ---------- */
+const NAME_FONT = px => `500 ${px}px "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif`;
+const NAME_INK = "#111a2e";
+async function nameFontReady(){ try { await document.fonts.load(NAME_FONT(14), C.name); } catch {} }
+/* 依頁面右側邊界自動縮小字級，回傳實際字級與寬度（單位：PDF 點） */
+function fitName(ctx, vw){
+  const n = C.nameAt; let size = n.size || 12;
+  ctx.font = NAME_FONT(size); let w = ctx.measureText(C.name).width;
+  const maxW = Math.max(40, vw - n.x - 18);
+  if (w > maxW){ size = Math.max(6, size * maxW / w); ctx.font = NAME_FONT(size); w = ctx.measureText(C.name).width; }
+  return { size, w };
+}
 async function renderPages(bytes, interactive){
-  const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  const doc = await pdfjsLib.getDocument({ data: bytes.slice(), ...PDFJS_OPTS }).promise;
   const box = $("pages"); box.innerHTML = "";
   const cssW = Math.min(box.clientWidth || 360, 720);
   const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
@@ -116,6 +129,11 @@ async function renderPages(bytes, interactive){
     const c = document.createElement("canvas"); c.width = vp.width; c.height = vp.height;
     wrap.append(c); box.append(wrap); canvases.push(c);
     await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+    if (interactive && C.nameAt && C.name && n - 1 === C.nameAt.page){
+      const ctx = c.getContext("2d"); ctx.save(); ctx.scale(scale * dpr, scale * dpr);
+      fitName(ctx, base.width); ctx.fillStyle = NAME_INK; ctx.textBaseline = "alphabetic";
+      ctx.fillText(C.name, C.nameAt.x, C.nameAt.y); ctx.restore();
+    }
     if (interactive && n - 1 === C.sig.page){
       const { x, y, w, h } = C.sig;
       const spot = document.createElement("div"); spot.className = "sigspot"; spot.id = "sigspot";
@@ -237,6 +255,18 @@ async function stamp(pngDataUrl, now){
     const drot = ((dp.rotate || 0) % 360 + 360) % 360;
     const [dx, dy] = dv.convertToPdfPoint(C.date.x, C.date.y);
     pages[C.date.page].drawText(fmtDate(now), { x: dx, y: dy, size: 11, font, color: rgb(.1, .12, .18), rotate: degrees(drot) });
+  }
+  if (C.nameAt && C.name && pages[C.nameAt.page]){
+    const np = await origPdf.getPage(C.nameAt.page + 1), nv = np.getViewport({ scale: 1 });
+    const nrot = ((np.rotate || 0) % 360 + 360) % 360, K = 4;
+    const cv = document.createElement("canvas"), cx = cv.getContext("2d");
+    const { size, w } = fitName(cx, nv.width), pad = 2, asc = size * 1.1, desc = size * 0.35;
+    cv.width = Math.ceil((w + pad * 2) * K); cv.height = Math.ceil((asc + desc) * K);
+    cx.scale(K, K); cx.font = NAME_FONT(size); cx.fillStyle = NAME_INK; cx.textBaseline = "alphabetic";
+    cx.fillText(C.name, pad, asc);
+    const nimg = await doc.embedPng(cv.toDataURL("image/png"));
+    const [nx, ny] = nv.convertToPdfPoint(C.nameAt.x - pad, C.nameAt.y + desc);
+    pages[C.nameAt.page].drawImage(nimg, { x: nx, y: ny, width: w + pad * 2, height: asc + desc, rotate: degrees(nrot) });
   }
   const off = -now.getTimezoneOffset(), tz = `UTC${off >= 0 ? "+" : "-"}${pad2(Math.floor(Math.abs(off) / 60))}:${pad2(Math.abs(off) % 60)}`;
   const rec = `Agreed & e-signed ${fmtDate(now)} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())} (${tz})`;

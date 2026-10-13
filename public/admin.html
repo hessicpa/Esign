@@ -118,17 +118,21 @@
             <div class="grid2">
               <label class="field" for="fPage">顯示第幾頁<select id="fPage"></select></label>
               <div class="field">在頁面上點一下，放到：
-                <div class="chips"><button class="chip" id="modeSig" aria-pressed="true">紅框：簽名位置</button><button class="chip" id="modeDate" aria-pressed="false">藍線：日期位置</button></div>
+                <div class="chips"><button class="chip" id="modeSig" aria-pressed="true">紅框：簽名位置</button><button class="chip" id="modeDate" aria-pressed="false">藍線：日期位置</button><button class="chip" id="modeName" aria-pressed="false">綠線：客戶名稱</button></div>
               </div>
             </div>
             <p class="small" id="placeStatus"></p>
             <label class="agree" for="fDate"><input type="checkbox" id="fDate" checked><span>自動填上簽署日期</span></label>
+            <div class="name-opt">
+              <label class="agree" for="fNameOn"><input type="checkbox" id="fNameOn"><span>自動填上客戶完整名稱（例如「致：＿＿＿管理當局」）</span></label>
+              <label class="field inline" for="fNameSize">字級<select id="fNameSize"><option value="10">10</option><option value="11">11</option><option value="12" selected>12</option><option value="13">13</option><option value="14">14</option><option value="16">16</option><option value="18">18</option></select></label>
+            </div>
             <div class="sliders">
               <label class="field" for="fW">簽名框寬度<input id="fW" type="range" min="80" max="320" value="180"></label>
               <label class="field" for="fH">簽名框高度<input id="fH" type="range" min="30" max="160" value="70"></label>
             </div>
-            <div class="place" id="place"><canvas id="placeCanvas"></canvas><div class="mark sig" id="markSig">簽名</div><div class="mark date" id="markDate"></div></div>
-            <p class="small">簽名會縮放後置中放進紅框，框的正下方會再加一行小字的電子簽署時間。</p>
+            <div class="place" id="place"><canvas id="placeCanvas"></canvas><div class="mark sig" id="markSig">簽名</div><div class="mark date" id="markDate"></div><div class="mark cname" id="markName" hidden></div></div>
+            <p class="small">簽名會縮放後置中放進紅框，框的正下方會再加一行小字的電子簽署時間。綠線是客戶名稱的起點（字的底線），點在底線左端即可；每位客戶會自動換成自己的完整名稱，太長時會自動縮小。</p>
           </div>
 
           <div class="cards" id="qEditorWrap">

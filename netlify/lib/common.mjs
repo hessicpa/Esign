@@ -88,6 +88,9 @@ export function cleanMeta(m) {
   const sig = { page: Math.round(num(s.page, 0, 999) ?? -1), x: num(s.x, 0, 5000), y: num(s.y, 0, 5000), w: num(s.w, 10, 2000), h: num(s.h, 10, 2000) };
   if (sig.page < 0 || [sig.x, sig.y, sig.w, sig.h].some(v => v === null)) throw new Error("bad_meta");
   const date = m.date ? pt(m.date, 999) : null;
+  // 客戶名稱自動填入的位置（文字左下基線）與字級
+  let nameAt = m.nameAt ? pt(m.nameAt, 999) : null;
+  if (nameAt) nameAt.size = Math.round((num(m.nameAt.size, 6, 36) ?? 12) * 2) / 2;
   const questions = (Array.isArray(m.questions) ? m.questions : []).slice(0, 30).map(q => ({
     q: str(q && q.q, 500),
     multi: !!(q && q.multi),
@@ -99,5 +102,5 @@ export function cleanMeta(m) {
   const category = CATEGORIES.includes(m.category) ? m.category : "uncat";
   const year = Math.round(num(m.year, 1990, 2100) ?? new Date().getFullYear());
   const client = cleanClient({ name, short: m.short, taxId: m.taxId, code: m.code });
-  return { name, short: client.short, taxId: client.taxId, code: client.code, category, year, title, sig, date, questions, summary: m.summary === true };
+  return { name, short: client.short, taxId: client.taxId, code: client.code, category, year, title, sig, date, nameAt, questions, summary: m.summary === true };
 }

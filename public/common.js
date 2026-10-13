@@ -24,3 +24,7 @@ function saveBlob(blob, name){
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
+
+/* pdf.js：沒嵌入字型的中文 PDF 需要字元對照表（cMap）才顯示得出來 */
+const PDFJS_BASE = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/";
+const PDFJS_OPTS = { cMapUrl: PDFJS_BASE + "cmaps/", cMapPacked: true, standardFontDataUrl: PDFJS_BASE + "standard_fonts/" };

@@ -17,8 +17,8 @@ export default async (req) => {
 
   if (req.method === "GET" && f === "meta") {
     const settings = (await s.get("settings.json", { type: "json" })) || {};
-    const { name, title, sig, date, questions, summary, signedAt } = meta;
-    return json({ name, title, sig, date, questions: questions || [], summary, signedAt: signedAt || null,
+    const { name, title, sig, date, nameAt, questions, summary, signedAt } = meta;
+    return json({ name, title, sig, date, nameAt: nameAt || null, questions: questions || [], summary, signedAt: signedAt || null,
       canResign: canResign(meta), firm: settings.firm || "" });
   }
 
