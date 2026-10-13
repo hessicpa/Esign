@@ -150,15 +150,13 @@ $("qClear").onclick = () => { $("qYear").value = ""; $("qText").value = ""; rend
 function filtered(){
   const y = $("qYear").value, q = $("qText").value.trim().toLowerCase();
   return ROWS.filter(r => (!y || String(r.year) === y) &&
-    (!q || [r.name, r.short, r.taxId, r.title].some(v => (v || "").toLowerCase().includes(q))));
+    (!q || [r.name, r.short, r.taxId, r.title, r.code].some(v => (v || "").toLowerCase().includes(q))));
 }
 const linkFor = id => `${location.origin}/sign.html?c=${encodeURIComponent(id)}`;
-const WINDOW_MS = 60 * 60 * 1000;
+/* 提交後即歸檔；管理人員開放重簽後，客戶可再提交一次 */
 function resignState(c){
   if (!c.signedAt) return null;
   if (c.resignAllowed) return { key: "open", text: "已開放重簽" };
-  const lock = Date.parse(c.firstSignedAt || c.signedAt) + WINDOW_MS;
-  if (Date.now() <= lock) return { key: "window", text: `客戶可重簽至 ${fmtDateTime(new Date(lock)).slice(11)}` };
   return { key: "archived", text: "已歸檔" };
 }
 
@@ -334,29 +332,50 @@ $("fName").addEventListener("input", () => {
   updateFnPreview();
   const hit = CLIENTS.find(c => c.name === $("fName").value.trim());
   if (hit){ $("fShort").value = hit.short || ""; $("fTaxId").value = hit.taxId || ""; }
+  const y = +$("fYear").value;
+  if (hit && statusOf(hit, y) === "終止") toast(`提醒：${hit.short || hit.name} 在 ${y} 年度的狀態是「終止」`, 4000);
 });
 
-/* 多位客戶：從客戶名單勾選 */
+/* 客戶比對：序號 > 統編 > 名稱 */
 let PICKED = new Set();
-const ckey = c => c.taxId || "n:" + c.name;
+const ckey = c => c.code ? "c:" + c.code : c.taxId ? "t:" + c.taxId : "n:" + c.name;
+const keysOf = x => [x.code && "c:" + x.code, x.taxId && "t:" + x.taxId, "n:" + x.name].filter(Boolean);
+function contractSet(year){ const set = new Set(); for (const r of ROWS) if (r.year === year) keysOf(r).forEach(k => set.add(k)); return set; }
+const hasIn = (set, c) => keysOf(c).some(k => set.has(k));
+const statusOf = (c, y) => (c.status && c.status[y]) || "";
+
+/* 多位客戶：從客戶名單勾選；預設只列出合約年度「存續」的客戶 */
 function renderPick(){
   const q = $("pickFilter").value.trim().toLowerCase(), box = $("pickList"); box.innerHTML = "";
-  $("pickEmpty").hidden = CLIENTS.length > 0; box.hidden = !CLIENTS.length;
-  const year = +$("fYear").value;
-  const have = new Set(ROWS.filter(r => r.year === year).map(r => r.taxId || "n:" + r.name));
+  const year = +$("fYear").value, showAll = $("pickShowAll").checked;
+  const have = contractSet(year);
+  const anyStatus = CLIENTS.some(c => statusOf(c, year));
+  const live = CLIENTS.filter(c => statusOf(c, year) === "存續").length;
+  const gone = CLIENTS.filter(c => statusOf(c, year) === "終止").length;
+  const unset = CLIENTS.length - live - gone;
+  box.hidden = !CLIENTS.length;
+  $("pickNote").textContent = !CLIENTS.length ? "客戶名單是空的。請先到左側「客戶名單」匯入客戶。"
+    : !anyStatus ? `客戶名單還沒有 ${year} 年度的存續狀態，先列出全部 ${CLIENTS.length} 位。可到「客戶名單」設定 ${year} 年度狀態。`
+    : showAll ? `列出全部 ${CLIENTS.length} 位（${year} 年度：存續 ${live}、終止 ${gone}、未設定 ${unset}）。`
+    : `只列出 ${year} 年度「存續」的 ${live} 位客戶（另有終止 ${gone} 位、未設定 ${unset} 位，勾選「也顯示非存續客戶」可列出）。`;
   for (const c of CLIENTS){
-    if (q && ![c.name, c.short, c.taxId].some(v => (v || "").toLowerCase().includes(q))) continue;
+    const st = statusOf(c, year);
+    if (anyStatus && !showAll && st !== "存續") continue;
+    if (q && ![c.code, c.name, c.short, c.taxId].some(v => (v || "").toLowerCase().includes(q))) continue;
     const k = ckey(c);
     const lab = document.createElement("label"); lab.className = "pickrow";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = PICKED.has(k);
     cb.onchange = () => { if (cb.checked) PICKED.add(k); else PICKED.delete(k); updatePickCount(); };
+    const code = document.createElement("span"); code.className = "code"; code.textContent = c.code || "";
     const nm = document.createElement("span"); nm.textContent = c.name + (c.short ? `（${c.short}）` : "");
-    if (have.has(k)){ const d = document.createElement("span"); d.className = "dup"; d.textContent = `已有 ${year} 年度此類合約`; nm.append(d); }
+    if (hasIn(have, c)){ const d = document.createElement("span"); d.className = "dup"; d.textContent = `已有 ${year} 年度此類合約`; nm.append(d); }
+    const sc = document.createElement("span"); sc.className = "st " + (st === "存續" ? "live" : st === "終止" ? "gone" : "none"); sc.textContent = st || "—";
     const t = document.createElement("span"); t.className = "tid"; t.textContent = c.taxId || "—";
-    lab.append(cb, nm, t); box.append(lab);
+    lab.append(cb, code, nm, sc, t); box.append(lab);
   }
   updatePickCount();
 }
+$("pickShowAll").onchange = renderPick;
 function updatePickCount(){ $("pickCount").textContent = `已選 ${PICKED.size} 位`; updateSaveLabel(); }
 $("pickFilter").addEventListener("input", renderPick);
 $("fYear").addEventListener("input", () => { if (NEW_MODE === "batch") renderPick(); });
@@ -550,7 +569,8 @@ async function saveSingle(meta){
   if (!name) { err("saveErr", "請填客戶名稱。"); $("fName").focus(); return; }
   if (taxId && taxId.length !== 8) { err("saveErr", "統一編號要是 8 碼數字，或留空。"); $("fTaxId").focus(); return; }
   const fd = new FormData();
-  fd.append("meta", JSON.stringify({ ...meta, name, short, taxId }));
+  const hit = CLIENTS.find(c => c.name === name && (!taxId || !c.taxId || c.taxId === taxId));
+  fd.append("meta", JSON.stringify({ ...meta, name, short, taxId, code: hit ? hit.code : "" }));
   fd.append("pdf", new Blob([ED.bytes], { type: "application/pdf" }), "contract.pdf");
   busy(true, "建立中…");
   try {
@@ -567,11 +587,15 @@ let dupArmed = false;
 async function saveBatch(meta){
   const chosen = CLIENTS.filter(c => PICKED.has(ckey(c)));
   if (!chosen.length) { err("saveErr", "請至少勾選一位客戶。"); return; }
-  const have = new Set(ROWS.filter(r => r.year === meta.year).map(r => r.taxId || "n:" + r.name));
-  const dups = chosen.filter(c => have.has(ckey(c)));
-  if (dups.length && !dupArmed){
+  const have = contractSet(meta.year);
+  const dups = chosen.filter(c => hasIn(have, c));
+  const notLive = chosen.filter(c => statusOf(c, meta.year) === "終止");
+  const warns = [];
+  if (dups.length) warns.push(`有 ${dups.length} 位客戶已經有 ${meta.year} 年度的${catOf(CAT).label}（例如：${dups.slice(0, 3).map(c => c.short || c.name).join("、")}）`);
+  if (notLive.length) warns.push(`有 ${notLive.length} 位勾選的客戶在 ${meta.year} 年度是「終止」（例如：${notLive.slice(0, 3).map(c => c.short || c.name).join("、")}）`);
+  if (warns.length && !dupArmed){
     dupArmed = true; setTimeout(() => { dupArmed = false; }, 8000);
-    err("saveErr", `有 ${dups.length} 位客戶已經有 ${meta.year} 年度的${catOf(CAT).label}（例如：${dups.slice(0, 3).map(c => c.short || c.name).join("、")}）。確定要再建一份，請再按一次「產生」。`);
+    err("saveErr", warns.join("；") + "。確定要建立，請再按一次「產生」。");
     return;
   }
   dupArmed = false;
@@ -610,6 +634,7 @@ async function finishCreate(list, msg){
 }
 
 /* ============ 客戶名單 ============ */
+/* 每位客戶：序號、名稱、簡稱、統編、組織型態，以及各年度狀態（存續／終止） */
 async function loadClients(){
   try { const r = await api("clients"); if (!r.ok) throw new Error(r.status); CLIENTS = (await r.json()).clients || []; }
   catch (e) { if (!quiet(e)) toast("讀取客戶名單失敗"); }
@@ -617,34 +642,78 @@ async function loadClients(){
 }
 function fillClientOptions(){
   const dl = $("clientOptions"); dl.innerHTML = "";
-  for (const c of CLIENTS){ const o = document.createElement("option"); o.value = c.name; o.label = [c.short, c.taxId].filter(Boolean).join("・"); dl.append(o); }
+  for (const c of CLIENTS){ const o = document.createElement("option"); o.value = c.name; o.label = [c.code, c.short, c.taxId].filter(Boolean).join("・"); dl.append(o); }
 }
 async function saveClients(list, okMsg, errId){
-  err(errId, "");
+  if (errId) err(errId, "");
   try {
     const r = await api("clients", { method: "POST", body: JSON.stringify({ clients: list }) });
     if (!r.ok) throw new Error(r.status);
     CLIENTS = (await r.json()).clients; CLIENT_COUNT = CLIENTS.length;
-    fillClientOptions(); renderClients(); renderNav(); toast(okMsg);
+    fillClientOptions(); renderClients(); renderNav(); if (okMsg) toast(okMsg);
     return true;
-  } catch (e) { if (!quiet(e)) err(errId, "儲存失敗，請再試一次。"); return false; }
+  } catch (e) { if (!quiet(e)) { if (errId) err(errId, "儲存失敗，請再試一次。"); else toast("儲存失敗，請再試一次"); } return false; }
 }
+
+/* 年度下拉：今年、明年，以及名單裡出現過的年度 */
+function fillClientYears(){
+  const sel = $("cYear"), keep = sel.value || String(THIS_YEAR);
+  const years = new Set([THIS_YEAR, THIS_YEAR + 1]);
+  for (const c of CLIENTS) for (const y of Object.keys(c.status || {})) years.add(+y);
+  sel.innerHTML = "";
+  for (const y of [...years].sort((a, b) => b - a)){ const o = document.createElement("option"); o.value = y; o.textContent = `${y} 年度`; sel.append(o); }
+  sel.value = keep;
+}
+const cYear = () => $("cYear").value || String(THIS_YEAR);
+
 let EDITING = null;
 function renderClients(){
-  const q = $("clientFilter").value.trim().toLowerCase(), box = $("clientRows"); box.innerHTML = "";
-  $("clientStats").innerHTML = ""; const s = document.createElement("span"); const b = document.createElement("b"); b.textContent = CLIENTS.length; s.append(b, "位客戶"); $("clientStats").append(s);
-  const list = CLIENTS.map((c, i) => [c, i]).filter(([c]) => !q || [c.name, c.short, c.taxId].some(v => (v || "").toLowerCase().includes(q)));
-  if (!list.length){ const e = document.createElement("div"); e.className = "empty"; e.textContent = CLIENTS.length ? "沒有符合的客戶。" : "還沒有客戶。按「從 Excel 貼上匯入」一次加入整份名單。"; box.append(e); return; }
+  fillClientYears();
+  const y = cYear(), q = $("clientFilter").value.trim().toLowerCase(), sf = $("cStatusFilter").value;
+  $("cYearHead").textContent = `${y} 狀態`;
+  const live = CLIENTS.filter(c => statusOf(c, y) === "存續").length, gone = CLIENTS.filter(c => statusOf(c, y) === "終止").length;
+  $("clientStats").innerHTML = "";
+  for (const [n, l] of [[CLIENTS.length, "位客戶"], [live, `${y} 存續`], [gone, `${y} 終止`]]){
+    const s = document.createElement("span"); const b = document.createElement("b"); b.textContent = n; s.append(b, l); $("clientStats").append(s);
+  }
+  // 新年度還沒設定狀態：提供「沿用前一年度」
+  const prev = String(+y - 1);
+  const prevLive = CLIENTS.filter(c => statusOf(c, prev) === "存續");
+  const show = CLIENTS.length && !CLIENTS.some(c => statusOf(c, y)) && prevLive.length;
+  $("carryBox").hidden = !show;
+  if (show){
+    $("carryText").textContent = `${y} 年度還沒有設定客戶狀態。可以先沿用 ${prev} 年度：${prev} 年度存續的 ${prevLive.length} 位設為 ${y} 存續，其餘設為終止，之後再個別調整。`;
+    $("btnCarry").textContent = `沿用 ${prev} 年度狀態`;
+  }
+
+  const box = $("clientRows"); box.innerHTML = "";
+  const list = CLIENTS.map((c, i) => [c, i]).filter(([c]) => {
+    const st = statusOf(c, y);
+    if (sf === "none" ? st : (sf && st !== sf)) return false;
+    return !q || [c.code, c.name, c.short, c.taxId, c.org].some(v => (v || "").toLowerCase().includes(q));
+  });
+  if (!list.length){ const e = document.createElement("div"); e.className = "empty"; e.textContent = CLIENTS.length ? "沒有符合的客戶。" : "還沒有客戶。按「匯入 Excel 名單」一次加入整份名單。"; box.append(e); return; }
   for (const [c, i] of list){
     const row = document.createElement("div"); row.className = "row crow";
     const acts = document.createElement("div"); acts.className = "acts";
     const mk = (label, fn, cls) => { const x = document.createElement("button"); x.className = "small" + (cls ? " " + cls : ""); x.textContent = label; x.onclick = () => fn(x); acts.append(x); };
+    // 年度狀態：直接在清單上切換，馬上儲存
+    const stSel = document.createElement("select"); stSel.setAttribute("aria-label", `${c.name} ${y} 年度狀態`);
+    for (const [v, t] of [["", "未設定"], ["存續", "存續"], ["終止", "終止"]]){ const o = document.createElement("option"); o.value = v; o.textContent = t; stSel.append(o); }
+    stSel.value = statusOf(c, y);
+    stSel.className = "st " + (stSel.value === "存續" ? "live" : stSel.value === "終止" ? "gone" : "none");
+    stSel.onchange = async () => {
+      const next = CLIENTS.map(x => ({ ...x, status: { ...(x.status || {}) } }));
+      if (stSel.value) next[i].status[y] = stSel.value; else delete next[i].status[y];
+      await saveClients(next, `${c.short || c.name}：${y} 年度設為${stSel.value || "未設定"}`);
+    };
     if (EDITING === i){
-      const ins = ["name", "short", "taxId"].map(k => { const x = document.createElement("input"); x.value = c[k] || ""; x.setAttribute("aria-label", { name: "客戶名稱", short: "簡稱", taxId: "統一編號" }[k]); return x; });
-      ins[2].inputMode = "numeric"; ins[2].maxLength = 8;
-      row.append(...ins);
+      const f = (k, label, w) => { const x = document.createElement("input"); x.value = c[k] || ""; x.setAttribute("aria-label", label); if (w) x.maxLength = w; return x; };
+      const ins = [f("code", "序號", 20), f("name", "客戶名稱"), f("short", "簡稱"), f("taxId", "統一編號", 8), f("org", "組織型態")];
+      ins[3].inputMode = "numeric"; ins[4].setAttribute("list", "orgOptions");
+      row.append(...ins, stSel);
       mk("儲存", async () => {
-        const v = { name: ins[0].value.trim(), short: ins[1].value.trim(), taxId: ins[2].value.replace(/\D/g, "") };
+        const v = { ...c, code: ins[0].value.trim(), name: ins[1].value.trim(), short: ins[2].value.trim(), taxId: ins[3].value.replace(/\D/g, ""), org: ins[4].value.trim() };
         if (!v.name) return toast("客戶名稱不能空白");
         if (v.taxId && v.taxId.length !== 8) return toast("統一編號要是 8 碼數字");
         const next = CLIENTS.slice(); next[i] = v; EDITING = null;
@@ -652,10 +721,12 @@ function renderClients(){
       }, "primary ink");
       mk("取消", () => { EDITING = null; renderClients(); });
     } else {
+      const code = document.createElement("div"); code.className = "code"; code.textContent = c.code || "—";
       const n = document.createElement("div"); n.className = "who"; const nb = document.createElement("b"); nb.textContent = c.name; n.append(nb);
       const sh = document.createElement("div"); sh.textContent = c.short || "—";
       const t = document.createElement("div"); t.className = "tid"; t.textContent = c.taxId || "—";
-      row.append(n, sh, t);
+      const og = document.createElement("div"); og.className = "sub"; og.textContent = c.org || "—";
+      row.append(code, n, sh, t, og, stSel);
       mk("編輯", () => { EDITING = i; renderClients(); });
       mk("刪除", async x => {
         if (!x.dataset.armed){ x.dataset.armed = "1"; x.textContent = "確定刪除？"; setTimeout(() => { delete x.dataset.armed; x.textContent = "刪除"; }, 4000); return; }
@@ -666,38 +737,76 @@ function renderClients(){
   }
 }
 $("clientFilter").addEventListener("input", renderClients);
+$("cYear").onchange = renderClients;
+$("cStatusFilter").onchange = renderClients;
+$("btnCarry").onclick = async () => {
+  const y = cYear(), prev = String(+y - 1);
+  const next = CLIENTS.map(c => ({ ...c, status: { ...(c.status || {}), [y]: statusOf(c, prev) === "存續" ? "存續" : "終止" } }));
+  $("btnCarry").disabled = true;
+  await saveClients(next, `已建立 ${y} 年度狀態`);
+  $("btnCarry").disabled = false;
+};
 
-$("btnAddClient").onclick = () => { $("addClientBox").hidden = false; $("importBox").hidden = true; $("cName").focus(); };
+$("btnAddClient").onclick = () => {
+  $("addClientBox").hidden = false; $("importBox").hidden = true;
+  $("addClientYear").textContent = `新增的客戶會設為 ${cYear()} 年度「存續」。`;
+  $("cName").focus();
+};
 $("cCancel").onclick = () => { $("addClientBox").hidden = true; };
 $("cSave").onclick = async () => {
-  const v = { name: $("cName").value.trim(), short: $("cShort").value.trim(), taxId: $("cTax").value.replace(/\D/g, "") };
+  const v = { code: $("cCode").value.trim(), name: $("cName").value.trim(), short: $("cShort").value.trim(),
+    taxId: $("cTax").value.replace(/\D/g, ""), org: $("cOrg").value.trim(), status: { [cYear()]: "存續" } };
   if (!v.name) return err("addClientErr", "請填客戶名稱。");
   if (v.taxId && v.taxId.length !== 8) return err("addClientErr", "統一編號要是 8 碼數字，或留空。");
+  if (v.code && CLIENTS.some(c => c.code === v.code)) return err("addClientErr", "名單裡已經有這個序號。");
   if (v.taxId && CLIENTS.some(c => c.taxId === v.taxId)) return err("addClientErr", "名單裡已經有這個統一編號。");
   if (await saveClients([...CLIENTS, v], `已加入「${v.name}」`, "addClientErr")){
-    for (const id of ["cName", "cShort", "cTax"]) $(id).value = "";
+    for (const id of ["cCode", "cName", "cShort", "cTax", "cOrg"]) $(id).value = "";
     $("addClientBox").hidden = true;
   }
 };
 
-/* 從 Excel 貼上／CSV：每列「客戶名稱、簡稱、統編」，可含標題列；統編可放在任何一欄 */
+/* ---------- 匯入：Excel 檔、CSV，或從 Excel 複製貼上 ---------- */
 let IMPORT = [];
-function parseClients(text){
-  const out = []; let first = true;
-  const HEAD = /^(客戶)?(名稱|全名)$|^簡稱$|^統(一)?編(號)?$|^公司名稱$/;
-  for (const raw of text.replace(/\r/g, "").split("\n")){
-    if (!raw.trim()) continue;
-    const cells = (raw.includes("\t") ? raw.split("\t") : splitCsv(raw)).map(v => v.trim().replace(/^="?|"$/g, "").replace(/^"|"$/g, ""));
-    const isHead = first && cells.some(v => HEAD.test(v));
-    first = false;
-    if (isHead) continue;   // 標題列
-    let ti = cells.findIndex(v => /^\d{8}$/.test(v.replace(/[-\s]/g, "")));
-    const taxId = ti >= 0 ? cells[ti].replace(/[-\s]/g, "") : "";
-    const rest = cells.filter((_, k) => k !== ti && cells[k] !== "");
-    if (!rest.length) continue;
-    out.push({ name: rest[0], short: rest[1] || "", taxId });
+const COLS = [
+  ["code", /^(序號|編號|客戶編號|代號|客戶代號)$/],
+  ["name", /^(客戶名稱|名稱|公司名稱|客戶全名|全名)$/],
+  ["short", /^(客戶簡稱|簡稱)$/],
+  ["taxId", /^(統一編號|統編|統一編號\(統編\))$/],
+  ["org", /^(組織型態|組織型式|組織)$/],
+];
+const normStatus = v => { v = String(v ?? "").trim(); return /^(存續|存在|有|是|Y|V|✓|O)$/i.test(v) ? "存續" : /^(終止|不存在|解約|停止|無|否|N|X)$/i.test(v) ? "終止" : ""; };
+/* rows：二維陣列（第一列為標題）。沒有標題時，退回「名稱、簡稱、統編」三欄 */
+function rowsToClients(rows){
+  rows = rows.map(r => r.map(v => String(v ?? "").trim().replace(/^="?|"$/g, "").replace(/^"|"$/g, ""))).filter(r => r.some(Boolean));
+  if (!rows.length) return [];
+  const head = rows[0], map = {}, years = {};
+  head.forEach((h, i) => {
+    for (const [k, re] of COLS) if (re.test(h) && map[k] === undefined) map[k] = i;
+    const y = h.replace(/\.0$/, ""); if (/^\d{4}$/.test(y) && +y >= 1990 && +y <= 2100) years[y] = i;
+  });
+  const out = [];
+  if (map.name !== undefined){
+    for (const r of rows.slice(1)){
+      const c = { name: r[map.name] || "" };
+      for (const k of ["code", "short", "taxId", "org"]) if (map[k] !== undefined) c[k] = r[map[k]] || "";
+      if (c.taxId) c.taxId = c.taxId.replace(/\.0$/, "").replace(/\D/g, ""); if (c.taxId && c.taxId.length < 8) c.taxId = c.taxId.padStart(8, "0");
+      c.status = {};
+      for (const [y, i] of Object.entries(years)){ const st = normStatus(r[i]); if (st) c.status[y] = st; }
+      if (c.name) out.push(c);
+    }
+    return out;
+  }
+  for (const r of rows){
+    let ti = r.findIndex(v => /^\d{8}$/.test(v.replace(/[-\s]/g, "")));
+    const taxId = ti >= 0 ? r[ti].replace(/[-\s]/g, "") : "";
+    const rest = r.filter((v, k) => k !== ti && v !== "");
+    if (rest.length) out.push({ name: rest[0], short: rest[1] || "", taxId, status: {} });
   }
   return out;
+}
+function textToRows(text){
+  return text.replace(/\r/g, "").split("\n").filter(l => l.trim()).map(l => l.includes("\t") ? l.split("\t") : splitCsv(l));
 }
 function splitCsv(line){
   const out = []; let cur = "", q = false;
@@ -708,33 +817,50 @@ function splitCsv(line){
   }
   out.push(cur); return out;
 }
-function updateImportPreview(){
-  IMPORT = parseClients($("importText").value);
-  const noTax = IMPORT.filter(c => !c.taxId).length;
-  $("importPreview").textContent = IMPORT.length
-    ? `讀到 ${IMPORT.length} 位客戶${noTax ? `（其中 ${noTax} 位沒有統編）` : ""}。例如：${IMPORT.slice(0, 3).map(c => `${c.name}${c.taxId ? " " + c.taxId : ""}`).join("、")}`
-    : "";
-  $("importSave").disabled = !IMPORT.length;
+function showImportPreview(){
+  const n = IMPORT.length, noTax = IMPORT.filter(c => !c.taxId).length;
+  const years = [...new Set(IMPORT.flatMap(c => Object.keys(c.status || {})))].sort();
+  const yrs = years.map(y => `${y}：存續 ${IMPORT.filter(c => c.status[y] === "存續").length}、終止 ${IMPORT.filter(c => c.status[y] === "終止").length}`).join("；");
+  $("importPreview").textContent = n
+    ? `讀到 ${n} 位客戶${noTax ? `（其中 ${noTax} 位沒有統編）` : ""}。${yrs ? "年度狀態　" + yrs + "。" : ""}例如：${IMPORT.slice(0, 2).map(c => [c.code, c.name, c.taxId].filter(Boolean).join(" ")).join("、")}`
+    : "讀不到客戶，請確認第一列有「客戶名稱」標題，或每列至少有客戶名稱。";
+  $("importSave").disabled = !n;
 }
-$("btnImport").onclick = () => { $("importBox").hidden = false; $("addClientBox").hidden = true; $("importText").focus(); };
+$("btnImport").onclick = () => { $("importBox").hidden = false; $("addClientBox").hidden = true; };
 $("importCancel").onclick = () => { $("importBox").hidden = true; };
-$("importText").addEventListener("input", updateImportPreview);
+$("importText").addEventListener("input", () => { IMPORT = rowsToClients(textToRows($("importText").value)); showImportPreview(); });
 $("importFile").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
+  err("importErr", "");
   const buf = await f.arrayBuffer();
-  let text = new TextDecoder("utf-8").decode(buf);
-  if (text.includes("�")) { try { text = new TextDecoder("big5").decode(buf); } catch {} }   // 舊版 Excel 存的中文 CSV
-  $("importText").value = text.replace(/^﻿/, ""); updateImportPreview();
+  if (/\.xlsx?$/i.test(f.name)){
+    if (!window.XLSX) return err("importErr", "Excel 讀取元件還在載入，請稍等幾秒再選一次檔案。");
+    try {
+      const wb = XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+      IMPORT = rowsToClients(rows);
+    } catch (x) { console.error(x); return err("importErr", "讀不到這個 Excel 檔，請另存成 .xlsx 再試一次。"); }
+  } else {
+    let text = new TextDecoder("utf-8").decode(buf);
+    if (text.includes("�")) { try { text = new TextDecoder("big5").decode(buf); } catch {} }   // 舊版 Excel 存的中文 CSV
+    IMPORT = rowsToClients(textToRows(text.replace(/^﻿/, "")));
+  }
+  $("importText").value = "";
+  showImportPreview();
 };
 $("importSave").onclick = async () => {
   const replace = document.querySelector('input[name="importMode"]:checked').value === "replace";
   let next;
   if (replace) next = IMPORT;
   else {
-    next = CLIENTS.slice();
+    next = CLIENTS.map(c => ({ ...c, status: { ...(c.status || {}) } }));
     for (const c of IMPORT){
-      const k = c.taxId ? next.findIndex(x => x.taxId === c.taxId) : next.findIndex(x => !x.taxId && x.name === c.name);
-      if (k >= 0) next[k] = { ...next[k], ...c, short: c.short || next[k].short }; else next.push(c);
+      const k = next.findIndex(x => (c.code && x.code === c.code) || (c.taxId && x.taxId === c.taxId) || (!c.code && !c.taxId && x.name === c.name));
+      if (k >= 0){
+        const o = next[k];
+        next[k] = { code: c.code || o.code, name: c.name || o.name, short: c.short || o.short, taxId: c.taxId || o.taxId, org: c.org || o.org, status: { ...(o.status || {}), ...(c.status || {}) } };
+      } else next.push(c);
     }
   }
   $("importSave").disabled = true;

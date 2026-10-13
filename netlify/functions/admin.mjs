@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { store, json, pdfResponse, isPdf, cleanMeta, cleanClient, mapLimit, ixKey, pdfKeyOf,
+import { store, json, pdfResponse, isPdf, cleanMeta, cleanClient, clientKey, mapLimit, ixKey, pdfKeyOf,
   CATEGORIES, ID_RE, MAX_PDF } from "../lib/common.mjs";
 
 /* 管理後台 API。每個請求都要在 x-admin-key 標頭帶上管理密碼（Netlify 環境變數 ADMIN_PASSWORD）。
@@ -44,7 +44,7 @@ async function ensureIndex(s) {
 
 async function newContract(s, base, client, pdfKey) {
   const id = newId();
-  const rec = { id, ...base, name: client.name, short: client.short, taxId: client.taxId,
+  const rec = { id, ...base, name: client.name, short: client.short, taxId: client.taxId, code: client.code || "",
     created: new Date().toISOString(), signedAt: null, ...(pdfKey ? { pdfKey } : {}) };
   await s.setJSON(`contracts/${id}.json`, rec);
   await s.set(ixKey(rec, false), "1");
@@ -101,8 +101,8 @@ export default async (req) => {
     const buf = await file.arrayBuffer();
     if (buf.byteLength > MAX_PDF) return json({ error: "too_large" }, 413);
     if (!isPdf(buf)) return json({ error: "not_pdf" }, 400);
-    const { name, short, taxId, ...base } = meta;
-    const rec = await newContract(s, base, { name, short, taxId }, null);
+    const { name, short, taxId, code, ...base } = meta;
+    const rec = await newContract(s, base, { name, short, taxId, code }, null);
     await s.set(`pdf/${rec.id}`, buf);
     return json({ ok: true, contract: rec });
   }
@@ -129,7 +129,7 @@ export default async (req) => {
     if (!clients.length || clients.length > BATCH_MAX) return json({ error: "bad_clients" }, 400);
     let base;
     try { base = cleanMeta({ ...body.meta, name: clients[0].name }); } catch { return json({ error: "bad_meta" }, 400); }
-    delete base.name; delete base.short; delete base.taxId;
+    delete base.name; delete base.short; delete base.taxId; delete base.code;
     const created = await mapLimit(clients, 10, c => newContract(s, base, c, `tpl/${body.tplId}`));
     return json({ ok: true, contracts: created });
   }
@@ -154,7 +154,7 @@ export default async (req) => {
     return pdfResponse(buf, fileName(meta));
   }
 
-  // 開放／取消開放重簽（超過 1 小時已歸檔的合約，開放後客戶可再簽一次）
+  // 開放／取消開放重簽（已提交的合約，開放後客戶可再簽一次，提交後自動鎖定）
   if (a === "reopen" && req.method === "POST") {
     if (!ID_RE.test(id)) return json({ error: "not_found" }, 404);
     const meta = await s.get(`contracts/${id}.json`, { type: "json" });
@@ -170,9 +170,9 @@ export default async (req) => {
       let body;
       try { body = await req.json(); } catch { return json({ error: "bad_request" }, 400); }
       const seen = new Set(), list = [];
-      for (const c of (Array.isArray(body.clients) ? body.clients : []).slice(0, 5000).map(cleanClient)) {
+      for (const c of (Array.isArray(body.clients) ? body.clients : []).slice(0, 3000).map(cleanClient)) {
         if (!c) continue;
-        const k = c.taxId || "n:" + c.name;
+        const k = clientKey(c);
         if (seen.has(k)) continue;
         seen.add(k); list.push(c);
       }

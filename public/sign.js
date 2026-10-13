@@ -64,8 +64,8 @@ async function showSignedView(){
     await renderPages(signedBytes, false);
   } catch (e) { console.error(e); return false; }
   setBanner();
-  $("hint").textContent = C.canResign && C.lockAt
-    ? `以下是你簽好的文件。如需修改，可在 ${zhDateTime(new Date(C.lockAt))} 前按「重新簽署」。`
+  $("hint").textContent = C.canResign
+    ? "以下是你先前簽好的文件。事務所已開放重新簽署，如需修改請按「重新簽署」。"
     : "以下是你簽好的文件。";
   $("qSection").hidden = true;
   $("barSign").hidden = true; $("barDone").hidden = false;
@@ -334,46 +334,61 @@ async function upload(){
     }
     if (!r.ok) throw new Error(r.status);
     const res = await r.json();
-    C.signedAt = res.signedAt; C.canResign = res.canResign; C.lockAt = res.lockAt;
+    C.signedAt = res.signedAt; C.canResign = false;
     setUp("ok"); setStep("done"); setBanner();
     $("upStatus").textContent = `✓ ${zhDateTime(new Date(C.signedAt))} 已簽署，回傳事務所完成。`;
   } catch (e) { console.error(e); setUp("fail"); }
 }
 $("btnRetry").onclick = upload;
 
+/* 簽完先預覽：提交之前都可以清除重簽；按「提交」才傳回事務所並鎖定 */
 $("padOk").onclick = async () => {
   $("padOk").disabled = true; $("padOk").textContent = "處理中…";
   try {
     signedBytes = await stamp(signaturePng(), new Date());
     $("scrim").hidden = true;
     await renderPages(signedBytes, false);
-    $("barSign").hidden = true; $("barDone").hidden = false; $("done").hidden = false;
+    $("barSign").hidden = true; $("barReview").hidden = false;
     lockQuestions(true);
-    $("hint").textContent = "簽名已放入文件。";
-    $("done").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth" });
-    upload();
+    $("hint").textContent = "簽名已放入文件，請確認後按「提交並傳回事務所」。";
+    const sp = C.sig.page, pages = document.querySelectorAll("#pages .page");
+    (pages[sp] || $("pages")).scrollIntoView({ block: "start", behavior: reduceMotion() ? "auto" : "smooth" });
   } catch (e) { console.error(e); toast("簽名放入文件時出錯，請再試一次"); }
   finally { $("padOk").textContent = "確認簽名"; $("padOk").disabled = strokes.length === 0; }
 };
+$("btnResignLocal").onclick = async () => {
+  signedBytes = null; strokes = [];
+  $("barReview").hidden = true; $("barSign").hidden = false;
+  lockQuestions(false);
+  const r = await renderPages(C.pdfBytes, true); origPdf = r.doc;
+  $("hint").textContent = "請重新簽名。";
+  openPad();
+};
+$("btnSubmit").onclick = async () => {
+  if (!signedBytes) return;
+  $("btnSubmit").disabled = true; $("btnResignLocal").disabled = true;
+  $("barReview").hidden = true; $("barDone").hidden = false; $("done").hidden = false;
+  $("hint").textContent = "簽名已提交。";
+  $("done").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth" });
+  await upload();
+  $("btnSubmit").disabled = false; $("btnResignLocal").disabled = false;
+};
 
-/* 重新簽署：先向伺服器確認還在 1 小時內（或管理人員已開放），否則顯示已歸檔 */
 $("btnRedo").onclick = async () => {
   if (!PREVIEW && C.signedAt){
     $("btnRedo").disabled = true;
     try {
       const r = await fetch(`/api/c?c=${encodeURIComponent(CID)}`);
-      if (r.ok){ const m = await r.json(); C.canResign = m.canResign; C.lockAt = m.lockAt; }
+      if (r.ok){ const m = await r.json(); C.canResign = m.canResign; }
     } catch {}
     $("btnRedo").disabled = false;
     if (!C.canResign){ notice(...ARCHIVED); return; }
   }
   signedBytes = null; strokes = [];
-  $("done").hidden = true; $("barDone").hidden = true; $("barSign").hidden = false; $("signedBanner").hidden = true;
+  $("done").hidden = true; $("barDone").hidden = true; $("barReview").hidden = true; $("barSign").hidden = false; $("signedBanner").hidden = true;
   $("qSection").hidden = !C.questions.length;
   lockQuestions(false);
-  $("hint").textContent = C.lockAt && !PREVIEW
-    ? `請在 ${zhDateTime(new Date(C.lockAt))} 前完成重新簽署，簽完會取代先前的版本。`
-    : "可以修改勾選內容後重新簽名。";
+  $("hint").textContent = "可以修改勾選內容後重新簽名，提交後會取代先前的版本。";
   const r = await renderPages(C.pdfBytes, true);
   origPdf = r.doc;
   setStep($("agree").checked ? "sign" : "agree");

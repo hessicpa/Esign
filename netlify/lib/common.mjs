@@ -33,16 +33,10 @@ export function isPdf(buf) {
   return String.fromCharCode(...h) === "%PDF-";
 }
 
-/* 重簽管控：第一次簽完 1 小時內可以重簽（覆蓋，保留最新）；
-   超過 1 小時就歸檔，要管理人員在後台按「開放重簽」才可以再簽一次。 */
-export const RESIGN_WINDOW_MS = 60 * 60 * 1000;
-export function lockAt(meta) {
-  if (!meta.signedAt) return null;
-  return Date.parse(meta.firstSignedAt || meta.signedAt) + RESIGN_WINDOW_MS;
-}
-export function canResign(meta, now = Date.now()) {
-  if (!meta.signedAt || meta.resignAllowed) return true;
-  return now <= lockAt(meta);
+/* 重簽管控：客戶按「提交」把簽好的 PDF 傳回後就鎖定，不能再重簽；
+   要重簽必須由管理人員在後台按「開放重簽」（開放一次，客戶再提交後又自動鎖定）。 */
+export function canResign(meta) {
+  return !meta.signedAt || !!meta.resignAllowed;
 }
 
 /* 合約類別（左側模組）；uncat 是改版前建立、沒有類別的舊合約 */
@@ -60,14 +54,22 @@ export async function mapLimit(arr, n, fn) {
   return out;
 }
 
-/* 客戶名單的一筆：名稱必填，統編 8 碼數字或空白 */
+/* 客戶名單的一筆：{ code 序號, name 名稱, short 簡稱, taxId 統編, org 組織型態, status: { "2026": "存續" | "終止" } }
+   名稱必填；統編只留數字，Excel 吃掉的前導 0 補回 8 碼 */
+export const STATUS = ["存續", "終止"];
 export function cleanClient(c) {
-  const name = typeof c?.name === "string" ? c.name.trim().slice(0, 100) : "";
-  const short = typeof c?.short === "string" ? c.short.trim().slice(0, 40) : "";
-  let taxId = typeof c?.taxId === "string" || typeof c?.taxId === "number" ? String(c.taxId).replace(/\D/g, "").slice(0, 8) : "";
-  if (taxId && !TAXID_RE.test(taxId)) taxId = "";
-  return name ? { name, short, taxId } : null;
+  const t = (v, n) => (typeof v === "string" || typeof v === "number" ? String(v).trim().slice(0, n) : "");
+  const name = t(c?.name, 100);
+  if (!name) return null;
+  let taxId = t(c?.taxId, 20).replace(/\D/g, "");
+  taxId = taxId && taxId.length <= 8 ? taxId.padStart(8, "0") : "";
+  const status = {};
+  if (c?.status && typeof c.status === "object")
+    for (const [y, v] of Object.entries(c.status).slice(0, 30))
+      if (/^\d{4}$/.test(y) && STATUS.includes(v)) status[y] = v;
+  return { code: t(c?.code, 20), name, short: t(c?.short, 40), taxId, org: t(c?.org, 20), status };
 }
+export const clientKey = c => c.code ? "c:" + c.code : c.taxId ? "t:" + c.taxId : "n:" + c.name;
 
 const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const num = (v, lo, hi) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : null);
@@ -96,6 +98,6 @@ export function cleanMeta(m) {
   })).filter(q => q.q && q.options.length);
   const category = CATEGORIES.includes(m.category) ? m.category : "uncat";
   const year = Math.round(num(m.year, 1990, 2100) ?? new Date().getFullYear());
-  const client = cleanClient({ name, short: m.short, taxId: m.taxId });
-  return { name, short: client.short, taxId: client.taxId, category, year, title, sig, date, questions, summary: m.summary === true };
+  const client = cleanClient({ name, short: m.short, taxId: m.taxId, code: m.code });
+  return { name, short: client.short, taxId: client.taxId, code: client.code, category, year, title, sig, date, questions, summary: m.summary === true };
 }

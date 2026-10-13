@@ -47,6 +47,13 @@
     <label class="agree" for="agree"><input type="checkbox" id="agree"><span>我已閱讀並同意本文件全部內容</span></label>
     <div class="btns"><button class="primary" id="btnSign" disabled>簽名</button></div>
   </div>
+  <div class="in" id="barReview" hidden>
+    <p class="small review-tip">請確認簽名與內容。按「提交」後會傳回事務所，之後就無法再修改。</p>
+    <div class="btns">
+      <button id="btnResignLocal">清除，重新簽名</button>
+      <button class="primary" id="btnSubmit">提交並傳回事務所</button>
+    </div>
+  </div>
   <div class="in" id="barDone" hidden>
     <div class="btns"><button class="primary" id="btnShare">回傳已簽署PDF</button></div>
     <p class="small" id="keepTip">PDF 回傳予本事務所後，請同時自行下載留存一份，以供日後查閱。</p>
