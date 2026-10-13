@@ -144,3 +144,8 @@ a.btnlink.seal:focus-visible{outline-color:color-mix(in srgb,var(--seal) 45%,tra
 .brand-title{font-size:14px;font-weight:500;letter-spacing:.06em;color:var(--ink);padding-left:12px;border-left:1px solid var(--line);line-height:1.4;min-width:0}
 .brand-title .sep{color:var(--muted);margin:0 .45em;font-weight:400}
 .review-tip{margin:0}
+.qinput{display:block;width:100%;box-sizing:border-box;margin-top:4px;font:inherit;font-size:16px;color:var(--ink);background:var(--sheet);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+.qinput:focus{outline:2px solid var(--date);outline-offset:1px;border-color:var(--date)}
+.q.missing .qinput{border-color:var(--seal)}
+.mark.qtext{border-bottom:2px dashed var(--date);color:var(--date);transform:translateY(-100%);white-space:nowrap;padding:0 2px;background:color-mix(in srgb,var(--date) 8%,transparent);justify-content:flex-start}
+.opt-fill{margin:-2px 0 4px 34px;width:calc(100% - 34px)}

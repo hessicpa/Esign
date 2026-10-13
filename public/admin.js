@@ -1,12 +1,11 @@
 /* ============ 管理後台 ============ */
 const CATS = [
-  { id: "bookkeeping",  label: "記帳合約",       group: "合約",   tone: "--tone-teal"  },
   { id: "registration", label: "工商合約",       group: "合約",   tone: "--tone-teal"  },
   { id: "withholding",  label: "扣繳確認函",     group: "確認函", tone: "--tone-sage"  },
   { id: "provisional",  label: "暫繳確認函",     group: "確認函", tone: "--tone-khaki" },
   { id: "nonop",        label: "業外收入確認函", group: "確認函", tone: "--tone-khaki" },
   { id: "settlement",   label: "結算申報確認函", group: "確認函", tone: "--tone-khaki" },
-  { id: "uncat",        label: "未分類（改版前）", group: "其他", tone: "--tone-grey", onlyIfAny: true },
+  { id: "uncat",        label: "未分類", group: "其他", tone: "--tone-grey", onlyIfAny: true },
 ];
 const catOf = id => CATS.find(c => c.id === id);
 const THIS_YEAR = new Date().getFullYear();
@@ -106,7 +105,7 @@ async function loadCounts(){
   } catch (e) { if (!quiet(e)) toast("讀取資料失敗，請重新整理頁面"); }
 }
 
-/* ---------- 頁面切換（網址 #bookkeeping、#clients、#settings） ---------- */
+/* ---------- 頁面切換（網址 #registration、#clients、#settings） ---------- */
 function route(){
   const h = (location.hash || "").slice(1);
   if (DRAFT && VIEW === "clients" && h !== "clients"){
@@ -115,7 +114,7 @@ function route(){
   }
   if (h === "clients") return showView("clients");
   if (h === "settings") return showView("settings");
-  showCat(catOf(h) ? h : "bookkeeping");
+  showCat(catOf(h) ? h : CATS[0].id);
 }
 window.addEventListener("hashchange", () => { if (!$("app").hidden) route(); });
 function showView(v){
@@ -123,18 +122,18 @@ function showView(v){
   $("viewCat").hidden = v !== "cat"; $("viewClients").hidden = v !== "clients"; $("viewSettings").hidden = v !== "settings";
   markNav();
   if (v === "clients") renderClients();
-  if (v === "settings"){ $("sDevice").value = deviceName(); loadLogs(); if (!USAGE) loadUsage(); }
+  if (v === "settings"){ let t = "general"; try { t = localStorage.getItem("esign.settab") || t; } catch {} showSetTab(t); }
   window.scrollTo(0, 0);
 }
 
 /* ============ 合約模組 ============ */
 async function showCat(cat){
-  if (CAT !== cat){ closeEditor(); $("qText").value = ""; $("qYear").value = ""; }
+  if (CAT !== cat){ closeEditor(); $("qText").value = ""; $("qYear").value = ""; SEL.clear(); }
   CAT = cat; showView("cat");
   const c = catOf(cat);
   $("catTitle").textContent = c.label;
   $("catTone").style.setProperty("--tone", `var(${c.tone})`);
-  $("newPanel").hidden = cat === "uncat";
+  $("newPanel").hidden = !!c.onlyIfAny;   // 未分類、已停用的模組只能查看，不能新增
   $("rowsSigned").innerHTML = $("rowsPending").innerHTML = '<div class="empty">讀取中…</div>';
   await loadRows();
 }
@@ -185,7 +184,50 @@ function renderRows(){
   fillRows($("rowsSigned"), signed, true);
   fillRows($("rowsPending"), pending, false);
   $("btnZip").disabled = !signed.length; $("btnExport").disabled = !pending.length;
+  updateBulk();
 }
+
+/* ---------- 全選／批次刪除 ---------- */
+const SEL = new Set();
+function updateBulk(){
+  for (const id of [...SEL]) if (!ROWS.some(r => r.id === id)) SEL.delete(id);   // 已不存在的不算
+  const list = filtered(), n = SEL.size;
+  $("bulkBar").hidden = !n;
+  if (!n) return;
+  const nSigned = ROWS.filter(r => SEL.has(r.id) && r.signedAt).length;
+  $("bulkInfo").textContent = `已選 ${n} 份合約` + (nSigned ? `（其中 ${nSigned} 份已簽署）` : "");
+  const allIn = list.every(r => SEL.has(r.id));
+  $("bulkAll").hidden = allIn;
+  $("bulkAll").textContent = list.length === ROWS.length ? `全選本模組 ${list.length} 份` : `全選目前清單 ${list.length} 份`;
+}
+$("bulkAll").onclick = () => { for (const r of filtered()) SEL.add(r.id); renderRows(); };
+$("bulkNone").onclick = () => { SEL.clear(); renderRows(); };
+$("bulkDel").onclick = async () => {
+  const ids = [...SEL]; if (!ids.length) return;
+  const nSigned = ROWS.filter(r => SEL.has(r.id) && r.signedAt).length;
+  const msg = `確定要刪除 ${ids.length} 份合約嗎？\n\n` +
+    (nSigned ? `其中 ${nSigned} 份客戶已簽署，已簽 PDF 也會一起刪除。建議先按「下載全部已簽 PDF（ZIP）」備份。\n\n` : "") +
+    "刪除後連結立即失效，而且無法復原。";
+  if (!confirm(msg)) return;
+  const b = $("bulkDel"); b.disabled = true; $("bulkAll").disabled = $("bulkNone").disabled = true;
+  let done = 0;
+  try {
+    for (let i = 0; i < ids.length; i += 100){
+      const part = ids.slice(i, i + 100);
+      b.textContent = `刪除中 ${done}/${ids.length}…`;
+      const r = await api("deleteMany", { method: "POST", body: JSON.stringify({ ids: part }) });
+      if (!r.ok) throw new Error(r.status);
+      done += part.length;
+      const gone = new Set(part); ROWS = ROWS.filter(x => !gone.has(x.id)); part.forEach(id => SEL.delete(id));
+    }
+    toast(`已刪除 ${done} 份合約`);
+  } catch (e) {
+    if (!quiet(e)) toast(done ? `已刪除 ${done} 份，其餘刪除失敗，請再試一次` : "刪除失敗，請再試一次", 4000);
+  } finally {
+    b.disabled = false; b.textContent = "刪除所選"; $("bulkAll").disabled = $("bulkNone").disabled = false;
+    renderRows(); loadCounts();
+  }
+};
 
 function fillRows(box, rows, signed){
   box.innerHTML = "";
@@ -194,11 +236,21 @@ function fillRows(box, rows, signed){
     e.textContent = ROWS.length ? "沒有符合條件的合約。" : (signed ? "還沒有客戶完成簽核。" : "目前沒有待簽的合約。按上方「新增合約」建立。");
     box.append(e); return;
   }
-  const head = document.createElement("div"); head.className = "rowhead row";
+  const head = document.createElement("div"); head.className = "rowhead row ck";
+  const all = document.createElement("input"); all.type = "checkbox"; all.className = "selbox";
+  all.setAttribute("aria-label", signed ? "全選已簽核" : "全選尚未簽核");
+  const nSel = rows.filter(c => SEL.has(c.id)).length;
+  all.checked = nSel === rows.length; all.indeterminate = nSel > 0 && nSel < rows.length;
+  all.onchange = () => { for (const c of rows) all.checked ? SEL.add(c.id) : SEL.delete(c.id); renderRows(); };
+  head.append(all);
   for (const t of ["客戶", "合約", signed ? "簽核狀態" : "建立日期", ""]){ const s = document.createElement("span"); s.textContent = t; head.append(s); }
   box.append(head);
   for (const c of rows){
-    const row = document.createElement("div"); row.className = "row" + (HIGHLIGHT.has(c.id) ? " new" : "");
+    const row = document.createElement("div"); row.className = "row ck" + (HIGHLIGHT.has(c.id) ? " new" : "") + (SEL.has(c.id) ? " sel" : "");
+    const pick = document.createElement("input"); pick.type = "checkbox"; pick.className = "selbox"; pick.checked = SEL.has(c.id);
+    pick.setAttribute("aria-label", `選取 ${c.name}`);
+    pick.onchange = () => { pick.checked ? SEL.add(c.id) : SEL.delete(c.id); renderRows(); };
+    row.append(pick);
     const who = document.createElement("div"); who.className = "who";
     const b = document.createElement("b"); b.textContent = c.name;
     const sub = document.createElement("div"); sub.className = "sub";
@@ -260,7 +312,7 @@ async function del(c, btn){
   try {
     const r = await api("delete", { method: "POST", query: "&c=" + encodeURIComponent(c.id) });
     if (!r.ok) throw new Error(r.status);
-    toast("已刪除"); ROWS = ROWS.filter(x => x.id !== c.id); renderRows(); loadCounts();
+    toast("已刪除"); ROWS = ROWS.filter(x => x.id !== c.id); SEL.delete(c.id); renderRows(); loadCounts();
   } catch (e) { btn.disabled = false; btn.textContent = "刪除"; if (!quiet(e)) toast("刪除失敗，請再試一次"); }
 }
 
@@ -400,7 +452,8 @@ const ED = { bytes: null, doc: null, page: 0, vw: 0, vh: 0, sig: null, date: nul
 function setMode(m){
   ED.mode = m;
   $("modeSig").setAttribute("aria-pressed", m === "sig"); $("modeDate").setAttribute("aria-pressed", m === "date"); $("modeName").setAttribute("aria-pressed", m === "name");
-  document.querySelectorAll("#qEd [data-mark]").forEach(b => b.setAttribute("aria-pressed", typeof m === "object" && b.dataset.mark === `${m.qi}-${m.oi}`));
+  const key = typeof m === "object" ? `${m.qi}-${m.oi}${m.fill ? "-f" : ""}` : "";
+  document.querySelectorAll("#qEd [data-mark]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mark === key));
 }
 $("modeSig").onclick = () => setMode("sig");
 $("modeDate").onclick = () => { if (!$("fDate").checked){ $("fDate").checked = true; ED.date = ED.date || defaultDate(); drawMarks(); } setMode("date"); };
@@ -431,7 +484,7 @@ $("fFile").onchange = async e => {
     return err("fileErr", enc ? "這份 PDF 有密碼保護，請先移除保護再上傳。" : "讀不到這份 PDF，請確認檔案是否完整。");
   }
   ED.bytes = bytes; ED.sig = null; ED.date = null; ED.nameAt = null;
-  ED.questions.forEach(q => q.options.forEach(o => o.mark = null));
+  ED.questions.forEach(q => { q.mark = null; q.options.forEach(o => { o.mark = null; o.inputMark = null; }); });
   ED.doc = await pdfjsLib.getDocument({ data: bytes.slice(), ...PDFJS_OPTS }).promise;
   const sel = $("fPage"); sel.innerHTML = "";
   for (let i = 1; i <= ED.doc.numPages; i++){ const o = document.createElement("option"); o.value = i - 1; o.textContent = `第 ${i} 頁` + (i === ED.doc.numPages ? "（最後一頁）" : ""); sel.append(o); }
@@ -483,6 +536,20 @@ function drawMarks(){
     Object.assign(d.style, { left: o.mark.x*k+"px", top: o.mark.y*k+"px" });
     $("place").append(d);
   }));
+  ED.questions.forEach((q, qi) => q.options.forEach((o, oi) => {
+    if (!o.input || !o.inputMark || o.inputMark.page !== ED.page) return;
+    const d = document.createElement("div"); d.className = "mark qtext optm";
+    d.textContent = `${qi + 1}-${oi + 1} ${o.input === "number" ? "3" : "客戶填寫"}`;
+    Object.assign(d.style, { left: o.inputMark.x*k+"px", top: o.inputMark.y*k+"px", fontSize: (o.inputMark.size || 11)*k+"px" });
+    $("place").append(d);
+  }));
+  ED.questions.forEach((q, qi) => {
+    if (!isTextQ(q) || !q.mark || q.mark.page !== ED.page) return;
+    const d = document.createElement("div"); d.className = "mark qtext optm";
+    d.textContent = `${qi + 1}. ${q.type === "number" ? "123,456" : "客戶填寫的文字"}`;
+    Object.assign(d.style, { left: q.mark.x*k+"px", top: q.mark.y*k+"px", fontSize: (q.mark.size || 11)*k+"px" });
+    $("place").append(d);
+  });
   const parts = [`紅框（簽名）在第 ${s.page + 1} 頁`];
   if (ED.date) parts.push(`藍線（日期）在第 ${ED.date.page + 1} 頁`);
   if (ED.nameAt) parts.push(`綠線（客戶名稱）在第 ${ED.nameAt.page + 1} 頁`);
@@ -495,6 +562,8 @@ function placeAt(e){
   if (m === "sig"){ ED.sig.page = ED.page; ED.sig.x = px - ED.sig.w/2; ED.sig.y = py - ED.sig.h/2; clampSig(); }
   else if (m === "date"){ ED.date = { page: ED.page, x: Math.min(Math.max(0, px), ED.vw - 60), y: Math.min(Math.max(14, py), ED.vh - 2) }; }
   else if (m === "name"){ ED.nameAt = { page: ED.page, x: Math.min(Math.max(0, px), ED.vw - 40), y: Math.min(Math.max(10, py), ED.vh - 2), size: nameSize() }; }
+  else if (m.fill){ const o = ED.questions[m.qi] && ED.questions[m.qi].options[m.oi]; if (!o) return; o.inputMark = { page: ED.page, x: Math.min(Math.max(0, px), ED.vw - 30), y: Math.min(Math.max(8, py), ED.vh - 2), size: o.inputSize || 11 }; updateFillBtn(m.qi, m.oi); }
+  else if (m.oi === "t"){ const q = ED.questions[m.qi]; if (!q) return; q.mark = { page: ED.page, x: Math.min(Math.max(0, px), ED.vw - 30), y: Math.min(Math.max(8, py), ED.vh - 2), size: q.size || 11 }; updateTextMarkBtn(m.qi); }
   else { const o = ED.questions[m.qi] && ED.questions[m.qi].options[m.oi]; if (!o) return; o.mark = { page: ED.page, x: Math.min(Math.max(6, px), ED.vw - 6), y: Math.min(Math.max(6, py), ED.vh - 6) }; updateMarkBtn(m.qi, m.oi); }
   drawMarks();
 }
@@ -516,47 +585,106 @@ function updateMarkBtn(qi, oi){
   const b = document.querySelector(`#qEd [data-mark="${qi}-${oi}"]`); if (b) b.textContent = markLabel(ED.questions[qi].options[oi]);
   const c = $(`qClr${qi}_${oi}`); if (c) c.hidden = !ED.questions[qi].options[oi].mark;
 }
+const isTextQ = q => q.type === "text" || q.type === "number";
+function textMarkLabel(q){ return q.mark ? `填寫位置在第 ${q.mark.page + 1} 頁（重標）` : "在 PDF 上標填寫位置"; }
+function updateTextMarkBtn(qi){
+  const q = ED.questions[qi], b = document.querySelector(`#qEd [data-mark="${qi}-t"]`); if (b) b.textContent = textMarkLabel(q);
+  const c = $(`qClr${qi}_t`); if (c) c.hidden = !q.mark;
+}
+function fillMarkLabel(o){ return o.inputMark ? `填寫位置在第 ${o.inputMark.page + 1} 頁（重標）` : "標填寫位置"; }
+function updateFillBtn(qi, oi){
+  const o = ED.questions[qi].options[oi], b = document.querySelector(`#qEd [data-mark="${qi}-${oi}-f"]`); if (b) b.textContent = fillMarkLabel(o);
+  const c = $(`qClr${qi}_${oi}f`); if (c) c.hidden = !o.inputMark;
+}
 function renderQEd(){
   const box = $("qEd"); box.innerHTML = "";
   ED.questions.forEach((q, qi) => {
     const wrap = el("div", { className: "qed" });
-    const qt = el("input", { type: "text", id: `qT${qi}`, value: q.q, placeholder: "題目，例如：本次委任的服務項目" });
+    const qt = el("input", { type: "text", id: `qT${qi}`, value: q.q, placeholder: isTextQ(q) ? "題目，例如：本年度業外收入金額" : "題目，例如：本次委任的服務項目" });
     qt.setAttribute("aria-label", `第 ${qi + 1} 題題目`);
     qt.oninput = () => q.q = qt.value;
-    const ty = el("select", { id: `qM${qi}` }, el("option", { value: "0", textContent: "單選" }), el("option", { value: "1", textContent: "可複選" }));
-    ty.value = q.multi ? "1" : "0"; ty.onchange = () => q.multi = ty.value === "1"; ty.setAttribute("aria-label", "題型");
+    const ty = el("select", { id: `qM${qi}` },
+      el("option", { value: "single", textContent: "勾選：單選" }), el("option", { value: "multi", textContent: "勾選：可複選" }),
+      el("option", { value: "text", textContent: "填寫：文字" }), el("option", { value: "number", textContent: "填寫：數字" }));
+    ty.value = isTextQ(q) ? q.type : (q.multi ? "multi" : "single"); ty.setAttribute("aria-label", "題型");
+    ty.onchange = () => {
+      const v = ty.value;
+      if (v === "text" || v === "number"){ q.type = v; q.multi = false; }
+      else { q.type = "choice"; q.multi = v === "multi"; if (!q.options.length) q.options = [{ t: "", mark: null }, { t: "", mark: null }]; }
+      if (typeof ED.mode === "object") setMode("sig");
+      renderQEd(); drawMarks();
+    };
     const rq = el("input", { type: "checkbox", id: `qR${qi}`, checked: q.required }); rq.onchange = () => q.required = rq.checked;
     const rql = el("label", { className: "ck", htmlFor: `qR${qi}` }, rq, "必填");
     const del = el("button", { className: "small danger", textContent: "刪除此題" });
     del.onclick = () => { ED.questions.splice(qi, 1); if (typeof ED.mode === "object") setMode("sig"); renderQEd(); drawMarks(); };
     wrap.append(el("div", { className: "r" }, el("strong", { textContent: `第 ${qi + 1} 題` }), ty, rql, del), el("div", { className: "r" }, qt));
     const opts = el("div", { className: "opts" });
-    q.options.forEach((o, oi) => {
-      const ot = el("input", { type: "text", id: `qO${qi}_${oi}`, value: o.t, placeholder: `選項 ${oi + 1}` });
-      ot.setAttribute("aria-label", `第 ${qi + 1} 題選項 ${oi + 1}`);
-      ot.oninput = () => { o.t = ot.value; drawMarks(); };
-      const mk = el("button", { className: "small", textContent: markLabel(o) });
-      mk.dataset.mark = `${qi}-${oi}`; mk.setAttribute("aria-pressed", "false");
+    if (isTextQ(q)){
+      // 客戶自行輸入：標出答案要寫在 PDF 的哪裡（底線左端）
+      const mk = el("button", { className: "small", textContent: textMarkLabel(q) });
+      mk.dataset.mark = `${qi}-t`; mk.setAttribute("aria-pressed", "false");
       mk.onclick = () => {
         if (!ED.doc){ toast("請先上傳 PDF"); return; }
-        setMode({ qi, oi }); toast("在下方 PDF 頁面上點一下要打勾的位置", 3000);
+        setMode({ qi, oi: "t" }); toast("在下方 PDF 頁面上點一下答案要寫的位置（底線的左端）", 3000);
         $("place").scrollIntoView({ block: "center", behavior: "smooth" });
       };
-      const clr = el("button", { className: "small", id: `qClr${qi}_${oi}`, textContent: "取消位置", hidden: !o.mark });
-      clr.onclick = () => { o.mark = null; updateMarkBtn(qi, oi); drawMarks(); };
-      const rm = el("button", { className: "small danger", textContent: "×" }); rm.setAttribute("aria-label", "刪除選項");
-      rm.onclick = () => { q.options.splice(oi, 1); if (typeof ED.mode === "object") setMode("sig"); renderQEd(); drawMarks(); };
-      opts.append(el("div", { className: "r" }, ot, mk, clr, rm));
-    });
-    const add = el("button", { className: "small", textContent: "＋ 新增選項" });
-    add.onclick = () => { q.options.push({ t: "", mark: null }); renderQEd(); $(`qO${qi}_${q.options.length - 1}`).focus(); };
-    opts.append(el("div", { className: "r" }, add));
+      const clr = el("button", { className: "small", id: `qClr${qi}_t`, textContent: "取消位置", hidden: !q.mark });
+      clr.onclick = () => { q.mark = null; updateTextMarkBtn(qi); drawMarks(); };
+      const sz = el("select", { id: `qS${qi}` }, ...[9, 10, 11, 12, 13, 14, 16].map(n => el("option", { value: String(n), textContent: `字級 ${n}` })));
+      sz.value = String((q.mark && q.mark.size) || q.size || 11); sz.setAttribute("aria-label", "字級");
+      sz.onchange = () => { q.size = +sz.value; if (q.mark) q.mark.size = q.size; drawMarks(); };
+      opts.append(el("div", { className: "r" }, mk, clr, sz),
+        el("p", { className: "small", textContent: q.type === "number"
+          ? "客戶會看到一個輸入框，只能填數字（可含千分位逗號、小數點）。"
+          : "客戶會看到一個輸入框，可輸入文字（最多 100 字）。" }));
+    } else {
+      q.options.forEach((o, oi) => {
+        const ot = el("input", { type: "text", id: `qO${qi}_${oi}`, value: o.t, placeholder: `選項 ${oi + 1}` });
+        ot.setAttribute("aria-label", `第 ${qi + 1} 題選項 ${oi + 1}`);
+        ot.oninput = () => { o.t = ot.value; drawMarks(); };
+        const mk = el("button", { className: "small", textContent: markLabel(o) });
+        mk.dataset.mark = `${qi}-${oi}`; mk.setAttribute("aria-pressed", "false");
+        mk.onclick = () => {
+          if (!ED.doc){ toast("請先上傳 PDF"); return; }
+          setMode({ qi, oi }); toast("在下方 PDF 頁面上點一下要打勾的位置", 3000);
+          $("place").scrollIntoView({ block: "center", behavior: "smooth" });
+        };
+        const clr = el("button", { className: "small", id: `qClr${qi}_${oi}`, textContent: "取消位置", hidden: !o.mark });
+        clr.onclick = () => { o.mark = null; updateMarkBtn(qi, oi); drawMarks(); };
+        const rm = el("button", { className: "small danger", textContent: "×" }); rm.setAttribute("aria-label", "刪除選項");
+        rm.onclick = () => { q.options.splice(oi, 1); if (typeof ED.mode === "object") setMode("sig"); renderQEd(); drawMarks(); };
+        const fsel = el("select", { id: `qF${qi}_${oi}` }, el("option", { value: "", textContent: "不需填寫" }),
+          el("option", { value: "number", textContent: "勾選後填數字" }), el("option", { value: "text", textContent: "勾選後填文字" }));
+        fsel.value = o.input || ""; fsel.setAttribute("aria-label", "勾選後是否要再填寫");
+        fsel.onchange = () => { o.input = fsel.value || undefined; if (!o.input) o.inputMark = null; if (typeof ED.mode === "object") setMode("sig"); renderQEd(); drawMarks(); };
+        opts.append(el("div", { className: "r" }, ot, mk, clr, fsel, rm));
+        if (o.input){
+          const fm = el("button", { className: "small", textContent: fillMarkLabel(o) });
+          fm.dataset.mark = `${qi}-${oi}-f`; fm.setAttribute("aria-pressed", "false");
+          fm.onclick = () => {
+            if (!ED.doc){ toast("請先上傳 PDF"); return; }
+            setMode({ qi, oi, fill: true }); toast(`在 PDF 上點一下「${o.t || "此選項"}」要填寫內容的位置（底線左端）`, 3000);
+            $("place").scrollIntoView({ block: "center", behavior: "smooth" });
+          };
+          const fc = el("button", { className: "small", id: `qClr${qi}_${oi}f`, textContent: "取消位置", hidden: !o.inputMark });
+          fc.onclick = () => { o.inputMark = null; updateFillBtn(qi, oi); drawMarks(); };
+          const fz = el("select", {}, ...[9, 10, 11, 12, 13, 14, 16].map(n => el("option", { value: String(n), textContent: `字級 ${n}` })));
+          fz.value = String((o.inputMark && o.inputMark.size) || o.inputSize || 11); fz.setAttribute("aria-label", "字級");
+          fz.onchange = () => { o.inputSize = +fz.value; if (o.inputMark) o.inputMark.size = o.inputSize; drawMarks(); };
+          opts.append(el("div", { className: "r fill-r" }, el("span", { className: "small", textContent: `↳ 勾「${o.t || "此選項"}」後要${o.input === "number" ? "填數字" : "填文字"}：` }), fm, fc, fz));
+        }
+      });
+      const add = el("button", { className: "small", textContent: "＋ 新增選項" });
+      add.onclick = () => { q.options.push({ t: "", mark: null }); renderQEd(); $(`qO${qi}_${q.options.length - 1}`).focus(); };
+      opts.append(el("div", { className: "r" }, add));
+    }
     wrap.append(opts); box.append(wrap);
   });
   setMode(ED.mode);
 }
 $("btnAddQ").onclick = () => {
-  ED.questions.push({ q: "", multi: false, required: true, options: [{ t: "", mark: null }, { t: "", mark: null }] });
+  ED.questions.push({ q: "", type: "choice", multi: false, required: true, mark: null, options: [{ t: "", mark: null }, { t: "", mark: null }] });
   renderQEd(); $(`qT${ED.questions.length - 1}`).focus();
 };
 
@@ -588,7 +716,9 @@ $("btnApplyPreset").onclick = async () => {
   try { localStorage.setItem(lastPresetKey(), p.id); } catch {}
   if (p.title) { $("fTitle").value = p.title; updateFnPreview(); }
   $("fSummary").checked = !!p.summary;
-  ED.questions = p.questions.map(q => ({ q: q.q, multi: q.multi, required: q.required, options: q.options.map(o => ({ t: o.t, mark: null })) }));
+  ED.questions = p.questions.map(q => ({ q: q.q, type: q.type || "choice", multi: q.multi, required: q.required, mark: null,
+    size: q.mark ? q.mark.size : undefined,
+    options: q.options.map(o => ({ t: o.t, mark: null, input: o.input, inputMark: null, inputSize: o.inputMark ? o.inputMark.size : undefined })) }));
   ED.preset = p;
   renderQEd();
   if (ED.doc) { await applyPlacement(p); toast(`已套用「${p.name}」`); }
@@ -607,7 +737,10 @@ async function applyPlacement(p){
   $("fNameOn").checked = !!p.nameAt; if (p.nameAt) $("fNameSize").value = String(p.nameAt.size || 12);
   p.questions.forEach((pq, qi) => {
     const q = ED.questions[qi]; if (!q) return;
-    pq.options.forEach((po, oi) => { const o = q.options[oi]; if (o) o.mark = po.mark ? { ...po.mark, page: map(po.mark.page) } : null; });
+    if (pq.mark) q.mark = { ...pq.mark, page: map(pq.mark.page) };
+    pq.options.forEach((po, oi) => { const o = q.options[oi]; if (!o) return;
+      o.mark = po.mark ? { ...po.mark, page: map(po.mark.page) } : null;
+      o.inputMark = po.inputMark ? { ...po.inputMark, page: map(po.inputMark.page) } : null; });
   });
   $("fPage").value = ED.sig.page;
   await loadPage(ED.sig.page);
@@ -618,8 +751,7 @@ $("btnSavePreset").onclick = async () => {
   if (!name) { toast("請先輸入範本名稱"); $("presetName").focus(); return; }
   if (!ED.doc || !ED.sig) { toast("請先上傳 PDF 並放好簽名框，再存成範本"); return; }
   const r = v => Math.round(v * 10) / 10, last = ED.doc.numPages - 1;
-  const questions = ED.questions.filter(q => q.q.trim()).map(q => ({ q: q.q.trim(), multi: !!q.multi, required: !!q.required,
-    options: q.options.filter(o => o.t.trim()).map(o => ({ t: o.t.trim(), mark: o.mark ? { page: o.mark.page, x: r(o.mark.x), y: r(o.mark.y) } : null })) }));
+  const questions = ED.questions.filter(q => q.q.trim()).map(q => qOut(q, r));
   const preset = { id: (PRESETS.find(p => p.name === name && p.category === CAT) || {}).id, name, category: CAT, title: $("fTitle").value.trim(),
     sig: { page: ED.sig.page, x: r(ED.sig.x), y: r(ED.sig.y), w: r(ED.sig.w), h: r(ED.sig.h) }, sigLast: ED.sig.page === last,
     date: ED.date ? { page: ED.date.page, x: r(ED.date.x), y: r(ED.date.y) } : null, dateLast: !!ED.date && ED.date.page === last,
@@ -647,6 +779,16 @@ $("btnDelPreset").onclick = async () => {
 };
 
 const nameMeta = () => ED.nameAt ? { page: ED.nameAt.page, x: Math.round(ED.nameAt.x * 10) / 10, y: Math.round(ED.nameAt.y * 10) / 10, size: ED.nameAt.size } : null;
+/* 題目送到伺服器的格式（勾選題含每個選項的打勾位置；填寫題含答案位置與字級） */
+function qOut(q, r){
+  const pt = m => m ? { page: m.page, x: r(m.x), y: r(m.y) } : null;
+  if (isTextQ(q)) return { q: q.q.trim(), type: q.type, required: !!q.required, multi: false, options: [],
+    mark: q.mark ? { ...pt(q.mark), size: q.mark.size || q.size || 11 } : null };
+  return { q: q.q.trim(), type: "choice", multi: !!q.multi, required: !!q.required,
+    options: q.options.filter(o => o.t.trim()).map(o => o.input
+      ? { t: o.t.trim(), mark: pt(o.mark), input: o.input, inputMark: o.inputMark ? { ...pt(o.inputMark), size: o.inputMark.size || o.inputSize || 11 } : null }
+      : { t: o.t.trim(), mark: pt(o.mark) }) };
+}
 /* ---------- 建立連結 ---------- */
 function collectMeta(){
   const title = $("fTitle").value.trim(), year = +$("fYear").value;
@@ -658,15 +800,20 @@ function collectMeta(){
   const questions = [];
   for (let i = 0; i < ED.questions.length; i++){
     const q = ED.questions[i], opts = q.options.filter(o => o.t.trim());
-    if (!q.q.trim() && !opts.length) continue;
+    if (!q.q.trim() && (isTextQ(q) || !opts.length)) continue;
     if (!q.q.trim()) throw [`第 ${i + 1} 題還沒填題目。`, `qT${i}`];
-    if (!opts.length) throw [`第 ${i + 1} 題至少要有一個選項。`];
-    questions.push({ q: q.q.trim(), multi: !!q.multi, required: !!q.required,
-      options: opts.map(o => ({ t: o.t.trim(), mark: o.mark ? { page: o.mark.page, x: r(o.mark.x), y: r(o.mark.y) } : null })) });
+    if (!isTextQ(q) && !opts.length) throw [`第 ${i + 1} 題至少要有一個選項。`];
+    questions.push(qOut(q, r));
   }
   const summary = $("fSummary").checked;
+  const tq = questions.findIndex(q => isTextQ(q) && !q.mark);
+  for (let i = 0; i < questions.length && !summary; i++){
+    const o = questions[i].options.find(o => o.input && !o.inputMark);
+    if (o) throw [`第 ${i + 1} 題的「${o.t}」有填寫欄，但還沒標填寫位置。請按「標填寫位置」，不然客戶填的內容不會出現在 PDF 上。`];
+  }
+  if (tq >= 0 && !summary) throw [`第 ${tq + 1} 題「${questions[tq].q}」還沒標填寫位置。請按「在 PDF 上標填寫位置」，不然客戶填的內容不會出現在 PDF 上。`];
   if (questions.length && !summary){
-    const qi = questions.findIndex(q => q.options.some(o => !o.mark));
+    const qi = questions.findIndex(q => !isTextQ(q) && q.options.some(o => !o.mark));
     if (qi >= 0){
       const oi = questions[qi].options.findIndex(o => !o.mark);
       throw [`第 ${qi + 1} 題的「${questions[qi].options[oi].t}」還沒標位置。請按「在 PDF 上標位置」點在方框上，不然客戶勾了也不會出現在 PDF 上。`];
@@ -1024,12 +1171,168 @@ $("importSave").onclick = async () => {
 $("btnSaveSettings").onclick = async () => {
   err("setErr", ""); $("btnSaveSettings").disabled = true;
   try {
-    setDeviceName($("sDevice").value.trim());
     const r = await api("settings", { method: "POST", body: JSON.stringify({ firm: $("sFirm").value }) });
     if (!r.ok) throw new Error(r.status);
     toast("已儲存"); await loadCounts();
   } catch (e) { if (!quiet(e)) err("setErr", "儲存失敗，請再試一次。"); }
   finally { $("btnSaveSettings").disabled = false; }
+};
+
+/* ---------- 系統設定分頁 ---------- */
+function showSetTab(t){
+  if (!["general", "presets", "logs"].includes(t)) t = "general";
+  try { localStorage.setItem("esign.settab", t); } catch {}
+  document.querySelectorAll("#setTabs [data-tab]").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === t));
+  $("tabGeneral").hidden = t !== "general"; $("tabPresets").hidden = t !== "presets"; $("tabLogs").hidden = t !== "logs";
+  if (t === "general" && !USAGE) loadUsage();
+  if (t === "presets") loadPresetMgr();
+  if (t === "logs") loadLogs();
+}
+document.querySelectorAll("#setTabs [data-tab]").forEach(b => b.onclick = () => showSetTab(b.dataset.tab));
+
+/* ---------- 範本管理 ---------- */
+let PEDIT = null, PORIG = null;
+async function loadPresetMgr(){
+  if (!PEDIT) $("presetRows").innerHTML = '<div class="empty">讀取中…</div>';
+  await loadPresets(); renderPresetRows();
+}
+function presetSummary(p){
+  const parts = [p.sigLast ? "簽名：最後一頁" : `簽名：第 ${p.sig.page + 1} 頁`];
+  if (p.date) parts.push("自動日期");
+  if (p.nameAt) parts.push(`客戶名稱（${p.nameAt.size || 12} 級）`);
+  const nText = p.questions.filter(isTextQ).length, nChoice = p.questions.length - nText;
+  if (nChoice) parts.push(`${nChoice} 題勾選`);
+  if (nText) parts.push(`${nText} 題填寫`);
+  if (!p.questions.length) parts.push("無題目");
+  if (p.summary) parts.push("附勾選結果頁");
+  return parts.join("・");
+}
+function renderPresetRows(){
+  const box = $("presetRows"); box.innerHTML = "";
+  if (!PRESETS.length){ box.innerHTML = '<div class="empty">還沒有範本。到任一模組按「新增合約」，上傳 PDF 並放好簽名框後，按「另存為範本」即可建立。</div>'; return; }
+  const order = id => { const i = CATS.findIndex(c => c.id === id); return i < 0 ? 99 : i; };
+  const list = [...PRESETS].sort((a, b) => order(a.category) - order(b.category) || a.name.localeCompare(b.name, "zh-Hant"));
+  for (const p of list){
+    const c = catOf(p.category);
+    const row = el("div", { className: "row prow" + (PEDIT && PEDIT.id === p.id ? " editing" : "") });
+    row.append(
+      el("div", { className: "who" }, el("b", { textContent: p.name }), el("div", { className: "sub", textContent: p.updated ? "更新於 " + fmtDateTime(new Date(p.updated)) : "" })),
+      el("div", { className: "doc" }, el("div", { textContent: c ? c.label : "—" }), el("div", { className: "sub", textContent: p.title || "（未設定）" })),
+      el("div", { className: "sub", textContent: presetSummary(p) }));
+    const acts = el("div", { className: "acts" });
+    const bE = el("button", { className: "small", textContent: "編輯" }); bE.onclick = () => openPresetEd(p.id);
+    const bC = el("button", { className: "small", textContent: "複製" }); bC.onclick = () => copyPreset(p, bC);
+    const bD = el("button", { className: "small danger", textContent: "刪除" }); bD.onclick = () => delPreset(p, bD);
+    acts.append(bE, bC, bD); row.append(acts); box.append(row);
+  }
+}
+async function postPreset(body){
+  const res = await api("presets", { method: "POST", body: JSON.stringify(body) });
+  if (res.status === 409) throw new Error("name_taken");
+  if (!res.ok) throw new Error(res.status);
+  PRESETS = (await res.json()).presets;
+  if (CAT) fillPresets();
+}
+async function copyPreset(p, b){
+  let name = `${p.name}（複本）`, i = 2;
+  while (PRESETS.some(x => x.name === name && x.category === p.category)) name = `${p.name}（複本 ${i++}）`;
+  const { id, updated, ...rest } = p;
+  b.disabled = true;
+  try { await postPreset({ preset: { ...rest, name: name.slice(0, 40) } }); renderPresetRows(); toast(`已複製為「${name}」`); }
+  catch (e) { if (!quiet(e)) toast("複製失敗，請再試一次"); }
+  finally { b.disabled = false; }
+}
+async function delPreset(p, b){
+  if (!b.dataset.armed){ b.dataset.armed = "1"; b.textContent = "確定刪除？"; setTimeout(() => { delete b.dataset.armed; b.textContent = "刪除"; }, 4000); return; }
+  b.disabled = true;
+  try {
+    await postPreset({ deleteId: p.id });
+    if (PEDIT && PEDIT.id === p.id) closePresetEd();
+    renderPresetRows(); toast(`已刪除範本「${p.name}」`);
+  } catch (e) { b.disabled = false; if (!quiet(e)) toast("刪除失敗，請再試一次"); }
+}
+function openPresetEd(id){
+  const p = PRESETS.find(x => x.id === id); if (!p) return;
+  PORIG = p; PEDIT = JSON.parse(JSON.stringify(p));
+  $("peHead").textContent = `編輯範本：${p.name}`;
+  $("peName").value = p.name; $("peTitleIn").value = p.title || "";
+  const sel = $("peCat"); sel.innerHTML = "";
+  for (const c of CATS.filter(c => !c.onlyIfAny || c.id === p.category)) sel.append(el("option", { value: c.id, textContent: c.label }));
+  sel.value = p.category;
+  // 位置要在 PDF 上放，這裡只能關掉；原本沒有的不能在這裡打開
+  $("peDate").checked = !!p.date; $("peDate").disabled = !p.date;
+  $("peDate").closest("label").title = p.date ? "" : "這個範本沒有放日期位置，請到新增合約時放置";
+  $("peNameOn").checked = !!p.nameAt; $("peNameOn").disabled = !p.nameAt;
+  $("peNameOn").closest("label").title = p.nameAt ? "" : "這個範本沒有放客戶名稱位置，請到新增合約時放置";
+  $("peNameSize").value = String(p.nameAt ? p.nameAt.size || 12 : 12); $("peNameSize").disabled = !p.nameAt;
+  $("peSummary").checked = !!p.summary;
+  err("peErr", ""); renderPeQs(); renderPresetRows();
+  $("presetEd").hidden = false;
+  $("presetEd").scrollIntoView({ block: "start", behavior: reduceMotion() ? "auto" : "smooth" });
+  $("peName").focus({ preventScroll: true });
+}
+function closePresetEd(){ PEDIT = PORIG = null; $("presetEd").hidden = true; renderPresetRows(); }
+$("peNameOn").onchange = e => { $("peNameSize").disabled = !e.target.checked; };
+$("peCancel").onclick = closePresetEd;
+const peCheck = (label, val, on) => { const i = el("input", { type: "checkbox", checked: !!val }); i.onchange = () => on(i.checked); return el("label", { className: "ck-inline" }, i, label); };
+function renderPeQs(){
+  const box = $("peQs"); box.innerHTML = "";
+  if (!PEDIT.questions.length) box.append(el("p", { className: "small", textContent: "這個範本沒有勾選題目。" }));
+  PEDIT.questions.forEach((q, qi) => {
+    const card = el("div", { className: "pq" });
+    const t = el("input", { value: q.q, placeholder: "題目", maxLength: 500, id: `peQ${qi}` }); t.oninput = () => { q.q = t.value; };
+    const del = el("button", { className: "small danger", textContent: "刪除題目" }); del.onclick = () => { PEDIT.questions.splice(qi, 1); renderPeQs(); };
+    const flags = el("div", { className: "pq-flags" }, peCheck("必填", q.required, v => { q.required = v; }));
+    if (isTextQ(q)) flags.append(el("span", { className: "tag nreq", textContent: q.type === "number" ? "填寫：數字" : "填寫：文字" }),
+      el("span", { className: "tag " + (q.mark ? "nreq" : "req"), textContent: q.mark ? `填寫位置在第 ${q.mark.page + 1} 頁` : "未標填寫位置" }));
+    else flags.append(peCheck("可複選", q.multi, v => { q.multi = v; }));
+    flags.append(del);
+    card.append(el("div", { className: "pq-h" }, el("span", { className: "pq-n", textContent: `${qi + 1}.` }), t), flags);
+    if (isTextQ(q)){ box.append(card); return; }
+    q.options.forEach((o, oi) => {
+      const oin = el("input", { value: o.t, placeholder: "選項文字", maxLength: 300, id: `peO${qi}-${oi}` }); oin.oninput = () => { o.t = oin.value; };
+      const tag = el("span", { className: "tag " + (o.mark ? "nreq" : "req"), textContent: o.mark ? `已標第 ${o.mark.page + 1} 頁` : "未標位置" });
+      const ftag = o.input ? el("span", { className: "tag " + (o.inputMark ? "nreq" : "req"), textContent: (o.input === "number" ? "附填數字" : "附填文字") + (o.inputMark ? "" : "（未標位置）") }) : "";
+      const x = el("button", { className: "small", textContent: "✕", title: "刪除選項" }); x.setAttribute("aria-label", "刪除選項");
+      x.onclick = () => { q.options.splice(oi, 1); renderPeQs(); };
+      card.append(el("div", { className: "pq-o" }, oin, tag, ftag, x));
+    });
+    const add = el("button", { className: "small", textContent: "＋ 新增選項" });
+    add.onclick = () => { q.options.push({ t: "", mark: null }); renderPeQs(); $(`peO${qi}-${q.options.length - 1}`).focus(); };
+    card.append(add); box.append(card);
+  });
+}
+$("peAddQ").onclick = () => { PEDIT.questions.push({ q: "", multi: false, required: true, options: [{ t: "", mark: null }] }); renderPeQs(); $(`peQ${PEDIT.questions.length - 1}`).focus(); };
+$("peSave").onclick = async () => {
+  err("peErr", "");
+  const name = $("peName").value.trim(), category = $("peCat").value;
+  if (!name) { err("peErr", "請填範本名稱。"); $("peName").focus(); return; }
+  if (PRESETS.some(x => x.id !== PEDIT.id && x.name === name && x.category === category)) { err("peErr", `「${catOf(category).label}」已經有叫「${name}」的範本，請換一個名稱。`); $("peName").focus(); return; }
+  const questions = [];
+  for (let i = 0; i < PEDIT.questions.length; i++){
+    const q = PEDIT.questions[i], opts = q.options.filter(o => o.t.trim());
+    if (!q.q.trim() && (isTextQ(q) || !opts.length)) continue;
+    if (!q.q.trim()) { err("peErr", `第 ${i + 1} 題還沒填題目。`); $(`peQ${i}`).focus(); return; }
+    if (isTextQ(q)) { questions.push({ q: q.q.trim(), type: q.type, required: !!q.required, multi: false, options: [], mark: q.mark || null }); continue; }
+    if (!opts.length) { err("peErr", `第 ${i + 1} 題至少要有一個選項。`); return; }
+    questions.push({ q: q.q.trim(), type: "choice", multi: !!q.multi, required: !!q.required, options: opts.map(o => ({ ...o, t: o.t.trim() })) });
+  }
+  const summary = $("peSummary").checked;
+  const preset = { ...PEDIT, name, category, title: $("peTitleIn").value.trim(), summary, questions,
+    date: $("peDate").checked ? PORIG.date : null, dateLast: $("peDate").checked && !!PORIG.dateLast,
+    nameAt: $("peNameOn").checked && PORIG.nameAt ? { ...PORIG.nameAt, size: +$("peNameSize").value } : null,
+    nameLast: $("peNameOn").checked && !!PORIG.nameLast };
+  delete preset.updated;
+  $("peSave").disabled = true;
+  try {
+    await postPreset({ preset });
+    const unmarked = !summary && questions.some(q => isTextQ(q) ? !q.mark : q.options.some(o => !o.mark || (o.input && !o.inputMark)));
+    closePresetEd();
+    toast(unmarked ? `已儲存「${name}」。有選項還沒標位置，套用後請在 PDF 上標好再建立連結` : `已儲存範本「${name}」`, unmarked ? 5000 : 2500);
+  } catch (e) {
+    if (e.message === "name_taken") err("peErr", "同一個模組已經有同名的範本，請換一個名稱。");
+    else if (!quiet(e)) err("peErr", "儲存失敗，請再試一次。");
+  } finally { $("peSave").disabled = false; }
 };
 
 /* ---------- 使用空間 ---------- */
@@ -1069,7 +1372,7 @@ async function loadLogs(){
 function renderLogs(){
   const box = $("logRows"); box.innerHTML = "";
   const list = $("logFailOnly").checked ? LOGS.filter(l => !l.ok) : LOGS;
-  if (!list.length){ box.innerHTML = '<div class="empty">還沒有紀錄。</div>'; $("logMoreWrap").hidden = true; return; }
+  if (!list.length){ box.innerHTML = $("logFailOnly").checked ? '<div class="empty">沒有登入失敗的紀錄。</div>' : '<div class="empty">還沒有紀錄。紀錄從這次更新後開始：請按左下角「登出」，再輸入密碼登入一次，就會出現第一筆。</div>'; $("logMoreWrap").hidden = true; return; }
   for (const l of list.slice(0, LOG_SHOW)){
     const row = document.createElement("div"); row.className = "row lrow";
     const cells = [

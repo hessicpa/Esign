@@ -40,7 +40,7 @@ export function canResign(meta) {
 }
 
 /* 合約類別（左側模組）；uncat 是改版前建立、沒有類別的舊合約 */
-export const CATEGORIES = ["bookkeeping", "registration", "withholding", "provisional", "nonop", "settlement", "uncat"];
+export const CATEGORIES = ["registration", "withholding", "provisional", "nonop", "settlement", "uncat"];
 export const ixKey = (m, signed) => `ix/${m.category || "uncat"}/${m.year || 0}/${signed ? "s" : "p"}/${m.id}`;
 export const pdfKeyOf = m => m.pdfKey || `pdf/${m.id}`;
 export const TAXID_RE = /^\d{8}$/;
@@ -91,14 +91,29 @@ export function cleanMeta(m) {
   // 客戶名稱自動填入的位置（文字左下基線）與字級
   let nameAt = m.nameAt ? pt(m.nameAt, 999) : null;
   if (nameAt) nameAt.size = Math.round((num(m.nameAt.size, 6, 36) ?? 12) * 2) / 2;
-  const questions = (Array.isArray(m.questions) ? m.questions : []).slice(0, 30).map(q => ({
-    q: str(q && q.q, 500),
-    multi: !!(q && q.multi),
-    required: !!(q && q.required),
-    options: (Array.isArray(q && q.options) ? q.options : []).slice(0, 30)
-      .map(o => ({ t: str(o && o.t, 300), mark: o && o.mark ? pt(o.mark, 999) : null }))
-      .filter(o => o.t),
-  })).filter(q => q.q && q.options.length);
+  // 題型：choice＝勾選（單選／複選）；text／number＝客戶自行輸入，寫在 PDF 的 mark 位置（文字底線左端）
+  const questions = (Array.isArray(m.questions) ? m.questions : []).slice(0, 30).map(q => {
+    const type = q && (q.type === "text" || q.type === "number") ? q.type : "choice";
+    const base = { q: str(q && q.q, 500), type, required: !!(q && q.required) };
+    if (type !== "choice") {
+      const mark = q.mark ? pt(q.mark, 999) : null;
+      if (mark) mark.size = Math.round((num(q.mark.size, 6, 36) ?? 11) * 2) / 2;
+      return { ...base, multi: false, options: [], mark };
+    }
+    return { ...base, multi: !!(q && q.multi),
+      options: (Array.isArray(q && q.options) ? q.options : []).slice(0, 30)
+        .map(o => {
+          const opt = { t: str(o && o.t, 300), mark: o && o.mark ? pt(o.mark, 999) : null };
+          // 選項附帶填寫欄（例如「有，請填數量」）：勾選後要再輸入文字或數字，寫在 inputMark 位置
+          if (o && (o.input === "text" || o.input === "number")) {
+            opt.input = o.input;
+            opt.inputMark = o.inputMark ? pt(o.inputMark, 999) : null;
+            if (opt.inputMark) opt.inputMark.size = Math.round((num(o.inputMark.size, 6, 36) ?? 11) * 2) / 2;
+          }
+          return opt;
+        })
+        .filter(o => o.t) };
+  }).filter(q => q.q && (q.type !== "choice" || q.options.length));
   const category = CATEGORIES.includes(m.category) ? m.category : "uncat";
   const year = Math.round(num(m.year, 1990, 2100) ?? new Date().getFullYear());
   const client = cleanClient({ name, short: m.short, taxId: m.taxId, code: m.code });

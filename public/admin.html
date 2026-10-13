@@ -80,7 +80,7 @@
             <label class="field inline" for="presetSel">設定範本<select id="presetSel"></select></label>
             <button class="small primary ink" id="btnApplyPreset">套用</button>
             <button class="small danger" id="btnDelPreset" hidden>刪除此範本</button>
-            <span class="small" id="presetNote">套用後會帶入合約名稱、簽名框、日期位置與勾選題目。</span>
+            <span class="small" id="presetNote">套用後會帶入合約名稱、簽名框、日期位置與題目。</span>
           </div>
 
           <div class="grid3">
@@ -136,8 +136,8 @@
           </div>
 
           <div class="cards" id="qEditorWrap">
-            <h3 class="sub-h">勾選題目（選填）</h3>
-            <p class="small">需要客戶勾選的項目可以在這裡出題，客戶必須先回答必填題才能簽名。請替每個選項按「在 PDF 上標位置」，點在 PDF 印好的 □ 方框上，客戶勾到的選項就會在那裡打 ✓。</p>
+            <h3 class="sub-h">題目（選填）：客戶勾選或自行填寫</h3>
+            <p class="small">客戶必須先回答必填題才能簽名。<b>勾選題</b>：替每個選項按「在 PDF 上標位置」，點在 PDF 印好的 □ 方框上，客戶勾到的選項就會在那裡打 ✓。<b>填寫題</b>（題型選「填寫：文字／數字」）：按「在 PDF 上標填寫位置」，點在要填答案的底線左端，客戶輸入的內容就會寫在那裡。</p>
             <div id="qEd" class="cards"></div>
             <div class="btns"><button class="small" id="btnAddQ">＋ 新增題目</button></div>
             <label class="agree" for="fSummary"><input type="checkbox" id="fSummary"><span>另外在 PDF 最後加一頁「勾選結果」（一般不需要）</span></label>
@@ -170,6 +170,14 @@
         <div class="rows" id="rowsPending"></div>
       </div>
       <p class="err" id="listErr" hidden></p>
+      <div class="savebar bulkbar" id="bulkBar" hidden role="region" aria-label="批次刪除">
+        <span id="bulkInfo"></span>
+        <div class="btns">
+          <button id="bulkAll">全選</button>
+          <button id="bulkNone">取消選取</button>
+          <button class="danger-solid" id="bulkDel">刪除所選</button>
+        </div>
+      </div>
     </section>
 
     <!-- ===== 客戶名單 ===== -->
@@ -239,52 +247,99 @@
     <!-- ===== 系統設定 ===== -->
     <section id="viewSettings" hidden>
       <div class="pagehead"><span class="tone-bar" style="--tone:var(--tone-ink)"></span><h2>系統設定</h2></div>
-      <div class="settings-grid">
-        <div class="panel">
-          <div class="panel-h"><h3>事務所資訊</h3></div>
-          <div class="panel-b">
-            <label class="field" for="sFirm">事務所名稱（顯示在客戶簽署頁上方）<input id="sFirm"></label>
-            <label class="field" for="sDevice">這台電腦名稱（登入紀錄會顯示）<input id="sDevice" maxlength="40" placeholder="例如 HESSICPA01"></label>
-            <p class="err" id="setErr" hidden></p>
-            <div class="btns"><button class="primary ink" id="btnSaveSettings">儲存</button></div>
+      <div class="seg settabs" role="tablist" aria-label="系統設定" id="setTabs">
+        <button role="tab" data-tab="general" aria-selected="true">一般設定</button>
+        <button role="tab" data-tab="presets" aria-selected="false">範本管理</button>
+        <button role="tab" data-tab="logs" aria-selected="false">登入紀錄</button>
+      </div>
+
+      <!-- 一般設定 -->
+      <div id="tabGeneral">
+        <div class="settings-grid">
+          <div class="panel">
+            <div class="panel-h"><h3>事務所資訊</h3></div>
+            <div class="panel-b">
+              <label class="field" for="sFirm">事務所名稱（顯示在客戶簽署頁上方）<input id="sFirm"></label>
+              <p class="err" id="setErr" hidden></p>
+              <div class="btns"><button class="primary ink" id="btnSaveSettings">儲存</button></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><h3>使用空間</h3><button class="small" id="btnUsage">重新計算</button></div>
+            <div class="panel-b">
+              <div class="usage-total"><b id="uTotal">—</b><span id="uTotalSub">按「重新計算」統計目前使用量</span></div>
+              <div class="usage-bar" aria-hidden="true"><i id="uBarOwn"></i><i id="uBarTpl"></i><i id="uBarSigned"></i></div>
+              <dl class="usage-list">
+                <div><dt><span class="sw own"></span>單一客戶原始 PDF</dt><dd id="uOwn">—</dd></div>
+                <div><dt><span class="sw tpl"></span>公版 PDF</dt><dd id="uTpl">—</dd></div>
+                <div><dt><span class="sw signed"></span>客戶已簽 PDF</dt><dd id="uSigned">—</dd></div>
+                <div><dt>合約份數</dt><dd id="uCount">—</dd></div>
+                <div><dt>客戶名單／設定範本</dt><dd id="uMisc">—</dd></div>
+              </dl>
+              <p class="small">Netlify 點數用量（部署、流量）請到 Netlify 的 Usage &amp; billing 查看。</p>
+            </div>
           </div>
         </div>
         <div class="panel">
-          <div class="panel-h"><h3>使用空間</h3><button class="small" id="btnUsage">重新計算</button></div>
+          <div class="panel-h"><h3>使用須知</h3></div>
           <div class="panel-b">
-            <div class="usage-total"><b id="uTotal">—</b><span id="uTotalSub">按「重新計算」統計目前使用量</span></div>
-            <div class="usage-bar" aria-hidden="true"><i id="uBarOwn"></i><i id="uBarTpl"></i><i id="uBarSigned"></i></div>
-            <dl class="usage-list">
-              <div><dt><span class="sw own"></span>單一客戶原始 PDF</dt><dd id="uOwn">—</dd></div>
-              <div><dt><span class="sw tpl"></span>公版 PDF</dt><dd id="uTpl">—</dd></div>
-              <div><dt><span class="sw signed"></span>客戶已簽 PDF</dt><dd id="uSigned">—</dd></div>
-              <div><dt>合約份數</dt><dd id="uCount">—</dd></div>
-              <div><dt>客戶名單／設定範本</dt><dd id="uMisc">—</dd></div>
-            </dl>
-            <p class="small">Netlify 點數用量（部署、流量）請到 Netlify 的 Usage &amp; billing 查看。</p>
+            <ul class="notes">
+              <li>客戶在按「提交」前都可以清除簽名重簽；提交後合約即歸檔、無法再簽。如需重簽，請在清單中按「開放重簽」（開放一次，客戶再提交後自動鎖定）。</li>
+              <li>每份 PDF 需在 4 MB 以內。公版 PDF 只存一份，供所有選定客戶共用。</li>
+              <li>客戶名單的「年度狀態」決定公版批次時預設列出哪些客戶：只列出該合約年度為「存續」的客戶。</li>
+              <li>網站每次更新部署會使用 Netlify 點數，功能調整請集中一次上傳。</li>
+              <li>已簽檔案下載存檔後，可刪除舊年度合約以節省空間；刪除後該連結即失效。</li>
+            </ul>
           </div>
         </div>
       </div>
-      <div class="panel">
-        <div class="panel-h">
-          <h3>登入紀錄</h3>
-          <div class="btns"><label class="ck-inline"><input type="checkbox" id="logFailOnly"> 只看登入失敗</label><button class="small" id="btnLogs">重新整理</button></div>
+
+      <!-- 範本管理 -->
+      <div id="tabPresets" hidden>
+        <div class="panel" id="presetEd" hidden>
+          <div class="panel-h"><h3 id="peHead">編輯範本</h3></div>
+          <div class="panel-b cards">
+            <div class="grid2">
+              <label class="field" for="peName">範本名稱<input id="peName" maxlength="40"></label>
+              <label class="field" for="peCat">所屬模組<select id="peCat"></select></label>
+            </div>
+            <label class="field" for="peTitleIn">預設合約名稱（套用範本時自動帶入）<input id="peTitleIn" maxlength="200"></label>
+            <div class="pe-opts">
+              <label class="agree" for="peDate"><input type="checkbox" id="peDate"><span>自動填上簽署日期</span></label>
+              <div class="name-opt">
+                <label class="agree" for="peNameOn"><input type="checkbox" id="peNameOn"><span>自動填上客戶完整名稱</span></label>
+                <label class="field inline" for="peNameSize">字級<select id="peNameSize"><option>10</option><option>11</option><option>12</option><option>13</option><option>14</option><option>16</option><option>18</option></select></label>
+              </div>
+              <label class="agree" for="peSummary"><input type="checkbox" id="peSummary"><span>另外在 PDF 最後加一頁「勾選結果」</span></label>
+            </div>
+            <p class="small pe-note">簽名框、日期、客戶名稱和打勾的<b>位置</b>要對著 PDF 調整：到該模組按「新增合約」→ 選這個範本 → 上傳 PDF，調整好後用<b>同一個範本名稱</b>按「另存為範本」，就會覆蓋更新。</p>
+            <div>
+              <h4 class="pe-h">題目</h4>
+              <div id="peQs"></div>
+              <button class="small" id="peAddQ">＋ 新增題目</button>
+            </div>
+            <p class="err" id="peErr" hidden></p>
+            <div class="btns"><button id="peCancel">取消</button><button class="primary ink" id="peSave">儲存範本</button></div>
+          </div>
         </div>
-        <div class="rowhead row lrow"><span>時間</span><span>結果</span><span>電腦名稱</span><span>瀏覽器／系統</span><span>位置</span><span>IP</span></div>
-        <div class="rows" id="logRows"><div class="empty">讀取中…</div></div>
-        <div class="btns more" id="logMoreWrap" hidden><button class="small" id="logMore">顯示更多</button></div>
+        <div class="panel">
+          <div class="panel-h"><h3>範本管理</h3><span class="small">範本在「新增合約」時建立：放好簽名框與題目後按「另存為範本」。</span></div>
+          <div class="rowhead row prow"><span>範本名稱</span><span>所屬模組／預設合約名稱</span><span>內容</span><span></span></div>
+          <div class="rows" id="presetRows"><div class="empty">讀取中…</div></div>
+        </div>
       </div>
-      <div class="panel">
-        <div class="panel-h"><h3>使用須知</h3></div>
-        <div class="panel-b">
-          <ul class="notes">
-            <li>客戶在按「提交」前都可以清除簽名重簽；提交後合約即歸檔、無法再簽。如需重簽，請在清單中按「開放重簽」（開放一次，客戶再提交後自動鎖定）。</li>
-            <li>每份 PDF 需在 4 MB 以內。公版 PDF 只存一份，供所有選定客戶共用。</li>
-            <li>客戶名單的「年度狀態」決定公版批次時預設列出哪些客戶：只列出該合約年度為「存續」的客戶。</li>
-            <li>網站每次更新部署會使用 Netlify 點數，功能調整請集中一次上傳。</li>
-            <li>已簽檔案下載存檔後，可刪除舊年度合約以節省空間；刪除後該連結即失效。</li>
-            <li>登入紀錄的位置是依 IP 推估的大概城市；電腦名稱是每台電腦自行填寫，網頁無法自動讀取電腦名稱。</li>
-          </ul>
+
+      <!-- 登入紀錄 -->
+      <div id="tabLogs" hidden>
+        <div class="panel">
+          <div class="panel-h">
+            <h3>登入紀錄</h3>
+            <div class="btns"><label class="ck-inline"><input type="checkbox" id="logFailOnly"> 只看登入失敗</label><button class="small" id="btnLogs">重新整理</button></div>
+          </div>
+          <p class="small log-note">每次「輸入密碼登入」記一筆（含密碼錯誤）；同一個分頁重新整理不算新的登入。位置是依 IP 推估的大概城市；電腦名稱在登入畫面填寫，每台電腦填一次即可。</p>
+          <div class="rowhead row lrow"><span>時間</span><span>結果</span><span>電腦名稱</span><span>瀏覽器／系統</span><span>位置</span><span>IP</span></div>
+          <div class="rows" id="logRows"><div class="empty">讀取中…</div></div>
+          <div class="btns more" id="logMoreWrap" hidden><button class="small" id="logMore">顯示更多</button></div>
         </div>
       </div>
     </section>

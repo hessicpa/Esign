@@ -200,3 +200,40 @@ button.ink:hover{background:var(--navy-2)}
 .name-opt{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
 .name-opt .field.inline{display:flex;align-items:center;gap:8px;margin:0}
 .name-opt .field.inline select{width:auto}
+
+/* 系統設定分頁 */
+.settabs{margin:0 0 16px}
+.log-note{margin:0;padding:10px 18px;border-bottom:1px solid var(--line)}
+/* 範本管理 */
+.row.prow{grid-template-columns:minmax(0,1.1fr) minmax(0,1.3fr) minmax(0,1.6fr) 200px}
+.row.prow.editing{background:var(--row-hover);box-shadow:inset 3px 0 0 var(--navy)}
+.pe-opts{display:grid;gap:8px}
+.pe-note{margin:0}
+.pe-h{margin:0 0 8px;font-size:14px}
+.pq{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;display:grid;gap:8px;background:var(--sheet)}
+.pq-h{display:flex;gap:8px;align-items:center}
+.pq-n{font-weight:600;color:var(--muted);flex:none}
+.pq-h input,.pq-o input{flex:1;min-width:0}
+.pq-flags{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
+.pq-flags .danger{margin-left:auto}
+.pq-o{display:flex;gap:8px;align-items:center;padding-left:22px}
+.pq-o .tag{margin:0}
+.pq > button.small{justify-self:start;margin-left:22px}
+@media (max-width:900px){.row.prow{grid-template-columns:1fr}.pq-o{padding-left:0}.pq > button.small{margin-left:0}}
+.pq-h input,.pq-o input{font:inherit;font-size:15px;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.pq-h input{font-weight:500}
+.field.inline select:disabled,.agree input:disabled + span{opacity:.5}
+#presetEd .panel-b{grid-template-columns:minmax(0,1fr)}
+.pq-h input,.pq-o input{width:100%}
+
+/* 合約清單：勾選欄與批次刪除 */
+.row.ck{grid-template-columns:18px minmax(0,1.5fr) minmax(0,1.3fr) minmax(0,.9fr) 318px}
+@media (min-width:1500px){.row.ck{grid-template-columns:18px minmax(0,1.5fr) minmax(0,1.3fr) minmax(0,.8fr) 440px}}
+@media (max-width:900px){.row.ck{grid-template-columns:18px minmax(0,1fr)}.row.ck > :not(.selbox){grid-column:2}.row.ck > .selbox{grid-row:1;align-self:start;margin-top:3px}}
+.selbox{width:18px;height:18px;margin:0;accent-color:var(--seal);cursor:pointer}
+.row.sel,.row.sel:hover{background:color-mix(in srgb,var(--seal) 7%,var(--sheet))}
+.bulkbar{border-color:var(--seal)}
+.bulkbar span{color:var(--seal)}
+button.danger-solid{background:var(--seal);border-color:var(--seal);color:#fff;font-weight:500}
+button.danger-solid:disabled{opacity:.6}
+.qed .r.fill-r{padding-left:14px;color:var(--muted)}

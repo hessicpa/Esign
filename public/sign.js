@@ -39,11 +39,11 @@ async function boot(){
   if (C.signedAt && !PREVIEW && await showSignedView()) return;
   $("pages").innerHTML = '<div class="loading">文件載入中…</div>';
   try {
-    if (C.nameAt) await nameFontReady();
+    if (C.nameAt || C.questions.some(isText)) await nameFontReady();
     const r = await renderPages(C.pdfBytes, true);
     origPdf = r.doc;
     $("hint").textContent = C.questions.length
-      ? `請往下閱讀全部內容，並回答文件下方的勾選題目。第 ${C.sig.page + 1} 頁有紅框簽名處。`
+      ? `請往下閱讀全部內容，並回答文件下方的題目。第 ${C.sig.page + 1} 頁有紅框簽名處。`
       : `請往下閱讀全部內容，第 ${C.sig.page + 1} 頁有紅框簽名處。`;
     setStep("read");
   } catch (e) { console.error(e); $("pages").innerHTML = '<div class="loading">文件無法顯示，請重新整理頁面。</div>'; }
@@ -107,12 +107,28 @@ const NAME_FONT = px => `500 ${px}px "Noto Sans TC","PingFang TC","Microsoft Jhe
 const NAME_INK = "#111a2e";
 async function nameFontReady(){ try { await document.fonts.load(NAME_FONT(14), C.name); } catch {} }
 /* 依頁面右側邊界自動縮小字級，回傳實際字級與寬度（單位：PDF 點） */
-function fitName(ctx, vw){
-  const n = C.nameAt; let size = n.size || 12;
-  ctx.font = NAME_FONT(size); let w = ctx.measureText(C.name).width;
-  const maxW = Math.max(40, vw - n.x - 18);
-  if (w > maxW){ size = Math.max(6, size * maxW / w); ctx.font = NAME_FONT(size); w = ctx.measureText(C.name).width; }
+function fitText(ctx, text, at, vw){
+  let size = at.size || 12;
+  ctx.font = NAME_FONT(size); let w = ctx.measureText(text).width;
+  const maxW = Math.max(40, vw - at.x - 18);
+  if (w > maxW){ size = Math.max(6, size * maxW / w); ctx.font = NAME_FONT(size); w = ctx.measureText(text).width; }
   return { size, w };
+}
+const fitName = (ctx, vw) => fitText(ctx, C.name, C.nameAt, vw);
+/* 把一段文字（客戶名稱、客戶填寫的答案）畫成圖片放到 PDF 的指定位置 */
+async function stampText(doc, pages, at, text){
+  if (!text || !at || !pages[at.page]) return;
+  try { await document.fonts.load(NAME_FONT(14), text); } catch {}
+  const np = await origPdf.getPage(at.page + 1), nv = np.getViewport({ scale: 1 });
+  const nrot = ((np.rotate || 0) % 360 + 360) % 360, K = 4;
+  const cv = document.createElement("canvas"), cx = cv.getContext("2d");
+  const { size, w } = fitText(cx, text, at, nv.width), pad = 2, asc = size * 1.1, desc = size * 0.35;
+  cv.width = Math.ceil((w + pad * 2) * K); cv.height = Math.ceil((asc + desc) * K);
+  cx.scale(K, K); cx.font = NAME_FONT(size); cx.fillStyle = NAME_INK; cx.textBaseline = "alphabetic";
+  cx.fillText(text, pad, asc);
+  const img = await doc.embedPng(cv.toDataURL("image/png"));
+  const [nx, ny] = nv.convertToPdfPoint(at.x - pad, at.y + desc);
+  pages[at.page].drawImage(img, { x: nx, y: ny, width: w + pad * 2, height: asc + desc, rotate: PDFLib.degrees(nrot) });
 }
 async function renderPages(bytes, interactive){
   const doc = await pdfjsLib.getDocument({ data: bytes.slice(), ...PDFJS_OPTS }).promise;
@@ -158,6 +174,7 @@ $("btnSign").onclick = trySign;
 /* ---------- 勾選題目 ---------- */
 function renderQuestions(){
   const qs = C.questions, box = $("qList"); box.innerHTML = "";
+  $("qSection").querySelector("h2").textContent = qs.some(isText) ? "請回答以下項目" : "請勾選以下項目";
   $("qSection").hidden = !qs.length;
   qs.forEach((q, i) => {
     const fs = document.createElement("fieldset"); fs.className = "q"; fs.id = "q" + i;
@@ -165,25 +182,75 @@ function renderQuestions(){
     const t1 = document.createElement("span"); t1.className = "tag " + (q.required ? "req" : "nreq"); t1.textContent = q.required ? "必填" : "選填"; lg.append(t1);
     if (q.multi){ const t2 = document.createElement("span"); t2.className = "tag nreq"; t2.textContent = "可複選"; lg.append(t2); }
     fs.append(lg);
+    if (isText(q)){
+      const inp = document.createElement("input"); inp.type = "text"; inp.id = `q${i}t`; inp.className = "qinput"; inp.autocomplete = "off";
+      inp.setAttribute("aria-label", q.q);
+      if (q.type === "number"){ inp.inputMode = "decimal"; inp.placeholder = "請輸入數字"; inp.maxLength = 24; }
+      else { inp.placeholder = "請輸入"; inp.maxLength = 100; }
+      inp.oninput = () => fs.classList.remove("missing");
+      fs.append(inp);
+    }
+    const syncFills = () => q.options.forEach((o, j) => {
+      if (!o.input) return;
+      const on = $(`q${i}o${j}`).checked, f = $(`q${i}o${j}f`);
+      f.hidden = !on; if (on && document.activeElement === $(`q${i}o${j}`)) f.focus();
+    });
     q.options.forEach((o, j) => {
       const lab = document.createElement("label"); lab.className = "opt-row"; lab.htmlFor = `q${i}o${j}`;
       const inp = document.createElement("input"); inp.type = q.multi ? "checkbox" : "radio"; inp.name = "q" + i; inp.id = `q${i}o${j}`;
-      inp.onchange = () => fs.classList.remove("missing");
+      inp.onchange = () => { fs.classList.remove("missing"); syncFills(); };
       const sp = document.createElement("span"); sp.textContent = o.t;
       lab.append(inp, sp); fs.append(lab);
+      if (o.input){
+        // 勾了這個選項才出現的填寫欄（例如「有」→ 填數量）
+        const f = document.createElement("input"); f.type = "text"; f.id = `q${i}o${j}f`; f.className = "qinput opt-fill"; f.hidden = true; f.autocomplete = "off";
+        f.setAttribute("aria-label", `${o.t}：請填寫`);
+        if (o.input === "number"){ f.inputMode = "decimal"; f.placeholder = `勾選「${o.t}」後請填入數字`; f.maxLength = 24; }
+        else { f.placeholder = `勾選「${o.t}」後請填寫`; f.maxLength = 100; }
+        f.oninput = () => fs.classList.remove("missing");
+        fs.append(f);
+      }
     });
     box.append(fs);
   });
 }
-const answers = () => C.questions.map((q, i) => q.options.map((o, j) => $(`q${i}o${j}`).checked ? j : -1).filter(j => j >= 0));
+const isText = q => q.type === "text" || q.type === "number";
+/* 全形數字、逗號轉半形 */
+const halfWidth = v => v.replace(/[０-９．，－＋]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+const answers = () => C.questions.map((q, i) => {
+  if (isText(q)){ const v = ($(`q${i}t`).value || "").trim(); return q.type === "number" ? halfWidth(v).replace(/\s+/g, "") : v; }
+  return q.options.map((o, j) => $(`q${i}o${j}`).checked ? j : -1).filter(j => j >= 0);
+});
+/* 選項附帶填寫欄的內容（只有勾選時才算） */
+const optFill = (i, j) => {
+  const o = C.questions[i].options[j], f = $(`q${i}o${j}f`);
+  if (!o.input || !f || !$(`q${i}o${j}`).checked) return "";
+  const v = f.value.trim(); return o.input === "number" ? halfWidth(v).replace(/\s+/g, "") : v;
+};
+const NUM_RE = /^[-+]?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/;
 const lockQuestions = b => document.querySelectorAll("#qList fieldset").forEach(f => f.disabled = b);
 function trySign(){
   const ans = answers();
   const miss = C.questions.findIndex((q, i) => q.required && !ans[i].length);
-  if (miss >= 0){
-    $("q" + miss).classList.add("missing");
-    $("q" + miss).scrollIntoView({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
-    toast(`請先回答第 ${miss + 1} 題`); return;
+  const badNum = C.questions.findIndex((q, i) => q.type === "number" && ans[i] && !NUM_RE.test(ans[i]));
+  // 勾了附帶填寫欄的選項：一定要填，數字欄要是數字
+  let fillMsg = "", fillQ = -1, fillEl = null;
+  C.questions.forEach((q, i) => {
+    if (fillQ >= 0 || isText(q)) return;
+    for (const j of ans[i]){
+      const o = q.options[j]; if (!o.input) continue;
+      const v = optFill(i, j);
+      if (!v){ fillQ = i; fillEl = $(`q${i}o${j}f`); fillMsg = `第 ${i + 1} 題勾選「${o.t}」，請填寫後面的欄位`; return; }
+      if (o.input === "number" && !NUM_RE.test(v)){ fillQ = i; fillEl = $(`q${i}o${j}f`); fillMsg = `第 ${i + 1} 題「${o.t}」請填入數字`; return; }
+    }
+  });
+  const bad = miss >= 0 ? miss : badNum >= 0 ? badNum : fillQ;
+  if (bad >= 0){
+    $("q" + bad).classList.add("missing");
+    $("q" + bad).scrollIntoView({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
+    toast(miss >= 0 ? `請先回答第 ${miss + 1} 題` : badNum >= 0 ? `第 ${badNum + 1} 題請輸入數字，例如 120000 或 120,000` : fillMsg);
+    if (miss < 0 && badNum < 0 && fillEl) fillEl.focus({ preventScroll: true });
+    return;
   }
   if (!$("agree").checked){ $("agree").focus(); toast("請先勾選「我已閱讀並同意」"); return; }
   openPad();
@@ -256,18 +323,7 @@ async function stamp(pngDataUrl, now){
     const [dx, dy] = dv.convertToPdfPoint(C.date.x, C.date.y);
     pages[C.date.page].drawText(fmtDate(now), { x: dx, y: dy, size: 11, font, color: rgb(.1, .12, .18), rotate: degrees(drot) });
   }
-  if (C.nameAt && C.name && pages[C.nameAt.page]){
-    const np = await origPdf.getPage(C.nameAt.page + 1), nv = np.getViewport({ scale: 1 });
-    const nrot = ((np.rotate || 0) % 360 + 360) % 360, K = 4;
-    const cv = document.createElement("canvas"), cx = cv.getContext("2d");
-    const { size, w } = fitName(cx, nv.width), pad = 2, asc = size * 1.1, desc = size * 0.35;
-    cv.width = Math.ceil((w + pad * 2) * K); cv.height = Math.ceil((asc + desc) * K);
-    cx.scale(K, K); cx.font = NAME_FONT(size); cx.fillStyle = NAME_INK; cx.textBaseline = "alphabetic";
-    cx.fillText(C.name, pad, asc);
-    const nimg = await doc.embedPng(cv.toDataURL("image/png"));
-    const [nx, ny] = nv.convertToPdfPoint(C.nameAt.x - pad, C.nameAt.y + desc);
-    pages[C.nameAt.page].drawImage(nimg, { x: nx, y: ny, width: w + pad * 2, height: asc + desc, rotate: degrees(nrot) });
-  }
+  if (C.nameAt && C.name) await stampText(doc, pages, C.nameAt, C.name);
   const off = -now.getTimezoneOffset(), tz = `UTC${off >= 0 ? "+" : "-"}${pad2(Math.floor(Math.abs(off) / 60))}:${pad2(Math.abs(off) % 60)}`;
   const rec = `Agreed & e-signed ${fmtDate(now)} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())} (${tz})`;
   let ry = y + h + 9; if (ry > vp.height - 4) ry = y - 3;
@@ -276,6 +332,7 @@ async function stamp(pngDataUrl, now){
 
   const ans = answers();
   for (let i = 0; i < C.questions.length; i++){
+    if (isText(C.questions[i])){ await stampText(doc, pages, C.questions[i].mark, ans[i]); continue; }
     for (const j of ans[i]){
       const m = C.questions[i].options[j].mark; if (!m || !pages[m.page]) continue;
       const v = (await origPdf.getPage(m.page + 1)).getViewport({ scale: 1 });
@@ -283,6 +340,7 @@ async function stamp(pngDataUrl, now){
       for (let k = 1; k < pts.length; k++)
         pages[m.page].drawLine({ start: { x: pts[k - 1][0], y: pts[k - 1][1] }, end: { x: pts[k][0], y: pts[k][1] }, thickness: 1.8, color: rgb(.05, .1, .35) });
     }
+    for (const j of ans[i]){ const o = C.questions[i].options[j]; if (o.input) await stampText(doc, pages, o.inputMark, optFill(i, j)); }
   }
   if (C.questions.length && C.summary !== false){
     for (const png of await summaryPages(ans, pngDataUrl, now)){
@@ -316,8 +374,14 @@ async function summaryPages(ans, sigPng, now){
     need(ql.length * 19 + 26);
     x.fillStyle = INK; x.font = qf; for (const l of ql){ x.fillText(l, M, y); y += 19; }
     y += 4;
+    if (isText(q)){
+      const af = F(ans[i] ? 700 : 400, 12), al = wrap(ans[i] || "（未填寫）", af, W - 2 * M - 26);
+      need(al.length * 18 + 4);
+      x.fillStyle = ans[i] ? INK : MUTED; x.font = af; for (const l of al){ x.fillText(l, M + 26, y); y += 18; }
+      y += 3;
+    }
     q.options.forEach((o, j) => {
-      const sel = ans[i].includes(j), of = F(sel ? 700 : 400, 12), ol = wrap(o.t, of, W - 2 * M - 26);
+      const sel = ans[i].includes(j), fv = sel ? optFill(i, j) : "", of = F(sel ? 700 : 400, 12), ol = wrap(fv ? `${o.t}：${fv}` : o.t, of, W - 2 * M - 26);
       need(ol.length * 18 + 4);
       x.strokeStyle = sel ? INK : "#9aa4b0"; x.lineWidth = 1; x.strokeRect(M + 4.5, y + 2.5, 11, 11);
       if (sel){ x.strokeStyle = INK; x.lineWidth = 1.8; x.beginPath(); x.moveTo(M + 6.5, y + 8); x.lineTo(M + 9.5, y + 11.5); x.lineTo(M + 15, y + 4); x.stroke(); }

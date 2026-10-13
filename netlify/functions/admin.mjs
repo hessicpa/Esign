@@ -44,6 +44,27 @@ async function ensureIndex(s) {
   });
   await s.set("ixv1", "1");
 }
+/* 已移除的模組（記帳合約 bookkeeping）：裡面若還有合約或範本，改放到「未分類」，不會遺失 */
+const REMOVED_CATS = ["bookkeeping"];
+async function migrateRemovedCats(s) {
+  if (await s.get("ixv2")) return;
+  for (const cat of REMOVED_CATS) {
+    const { blobs } = await s.list({ prefix: `ix/${cat}/` });
+    await mapLimit(blobs, 10, async b => {
+      const id = b.key.split("/").pop();
+      const m = await s.get(`contracts/${id}.json`, { type: "json" });
+      await s.delete(b.key);
+      if (!m) return;
+      m.category = "uncat";
+      await s.setJSON(`contracts/${id}.json`, m);
+      await s.set(ixKey(m, !!m.signedAt), "1");
+    });
+  }
+  const presets = (await s.get("presets.json", { type: "json" })) || [];
+  if (presets.some(p => REMOVED_CATS.includes(p.category)))
+    await s.setJSON("presets.json", presets.map(p => REMOVED_CATS.includes(p.category) ? { ...p, category: "uncat" } : p));
+  await s.set("ixv2", "1");
+}
 
 /* 登入紀錄：時間、成功或失敗、IP、大概位置、瀏覽器，以及使用者自己設定的電腦名稱 */
 async function logLogin(s, req, context, ok) {
@@ -56,6 +77,14 @@ async function logLogin(s, req, context, ok) {
   const list = (await s.get("loginlog.json", { type: "json" })) || [];
   list.unshift(entry);
   await s.setJSON("loginlog.json", list.slice(0, 500));
+}
+async function deleteContract(s, id) {
+  const meta = await s.get(`contracts/${id}.json`, { type: "json" });
+  if (!meta) return;
+  const jobs = [s.delete(`contracts/${id}.json`), s.delete(`signed/${id}`),
+    s.delete(ixKey(meta, false)), s.delete(ixKey(meta, true))];
+  if (!meta.pdfKey) jobs.push(s.delete(`pdf/${id}`));   // 公版 PDF 由其他客戶共用，不刪
+  await Promise.all(jobs);
 }
 const blobSize = async (s, key) => { const b = await s.get(key, { type: "arrayBuffer" }); return b ? b.byteLength : 0; };
 
@@ -118,7 +147,7 @@ export default async (req, context) => {
   }
 
   if (a === "counts" && req.method === "GET") {
-    await ensureIndex(s);
+    await ensureIndex(s); await migrateRemovedCats(s);
     const { blobs } = await s.list({ prefix: "ix/" });
     const counts = {};
     for (const b of blobs) {
@@ -132,7 +161,7 @@ export default async (req, context) => {
   }
 
   if (a === "list" && req.method === "GET") {
-    await ensureIndex(s);
+    await ensureIndex(s); await migrateRemovedCats(s);
     const cat = url.searchParams.get("cat") || "";
     if (!CATEGORIES.includes(cat)) return json({ error: "bad_request" }, 400);
     const year = url.searchParams.get("year");
@@ -192,13 +221,18 @@ export default async (req, context) => {
 
   if (a === "delete" && req.method === "POST") {
     if (!ID_RE.test(id)) return json({ error: "not_found" }, 404);
-    const meta = await s.get(`contracts/${id}.json`, { type: "json" });
-    if (!meta) return json({ ok: true });
-    const jobs = [s.delete(`contracts/${id}.json`), s.delete(`signed/${id}`),
-      s.delete(ixKey(meta, false)), s.delete(ixKey(meta, true))];
-    if (!meta.pdfKey) jobs.push(s.delete(`pdf/${id}`));   // 公版 PDF 由其他客戶共用，不刪
-    await Promise.all(jobs);
+    await deleteContract(s, id);
     return json({ ok: true });
+  }
+
+  // 一次刪除多份合約（後台「全選 → 刪除所選」；每次最多 100 份，前端會分批送）
+  if (a === "deleteMany" && req.method === "POST") {
+    let body;
+    try { body = await req.json(); } catch { return json({ error: "bad_request" }, 400); }
+    const ids = [...new Set(Array.isArray(body.ids) ? body.ids : [])].filter(x => ID_RE.test(String(x)));
+    if (!ids.length || ids.length > 100) return json({ error: "bad_request" }, 400);
+    await mapLimit(ids, 8, x => deleteContract(s, x));
+    return json({ ok: true, deleted: ids.length });
   }
 
   if ((a === "signed" || a === "pdf") && req.method === "GET") {
@@ -254,6 +288,9 @@ export default async (req, context) => {
         const rec = { id: ID_RE.test(p.id || "") ? p.id : newId(), name, category: m.category, title: typeof p.title === "string" ? p.title.trim().slice(0, 200) : "",
           sig: m.sig, sigLast: !!p.sigLast, date: m.date, dateLast: !!p.dateLast, nameAt: m.nameAt, nameLast: !!p.nameLast, questions: m.questions, summary: m.summary,
           updated: new Date().toISOString() };
+        // 從範本管理改名時，不可以撞到同模組的另一個範本（避免默默覆蓋掉）
+        if (ID_RE.test(p.id || "") && list.some(x => x.id === p.id) && list.some(x => x.id !== rec.id && x.name === rec.name && x.category === rec.category))
+          return json({ error: "name_taken" }, 409);
         next = list.filter(x => x.id !== rec.id && !(x.name === rec.name && x.category === rec.category));
         next.unshift(rec);
         if (next.length > 100) next = next.slice(0, 100);
