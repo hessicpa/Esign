@@ -13,6 +13,7 @@ import { store, json, pdfResponse, isPdf, cleanMeta, cleanClient, clientKey, map
    ?a=signed|pdf&c=              下載已簽／原始 PDF
    ?a=reopen&c=&on=1|0 (POST)    開放／取消開放重簽
    ?a=clients       (GET/POST)   客戶名單
+   ?a=presets       (GET/POST)   設定範本（簽名框、日期、題目）；POST 帶 { preset } 新增或覆蓋，帶 { deleteId } 刪除
    ?a=settings      (POST)       事務所名稱 */
 const sha = s => createHash("sha256").update(String(s)).digest();
 function authorized(req) {
@@ -178,6 +179,32 @@ export default async (req) => {
       }
       await s.setJSON("clients.json", list);
       return json({ ok: true, clients: list });
+    }
+  }
+
+  if (a === "presets") {
+    const list = (await s.get("presets.json", { type: "json" })) || [];
+    if (req.method === "GET") return json({ presets: list });
+    if (req.method === "POST") {
+      let body;
+      try { body = await req.json(); } catch { return json({ error: "bad_request" }, 400); }
+      let next = list;
+      if (body.deleteId) next = list.filter(p => p.id !== body.deleteId);
+      else {
+        const p = body.preset || {};
+        const name = typeof p.name === "string" ? p.name.trim().slice(0, 40) : "";
+        if (!name) return json({ error: "bad_request" }, 400);
+        let m;
+        try { m = cleanMeta({ ...p, name: "範本", title: p.title || name }); } catch { return json({ error: "bad_meta" }, 400); }
+        const rec = { id: ID_RE.test(p.id || "") ? p.id : newId(), name, category: m.category, title: typeof p.title === "string" ? p.title.trim().slice(0, 200) : "",
+          sig: m.sig, sigLast: !!p.sigLast, date: m.date, dateLast: !!p.dateLast, questions: m.questions, summary: m.summary,
+          updated: new Date().toISOString() };
+        next = list.filter(x => x.id !== rec.id && !(x.name === rec.name && x.category === rec.category));
+        next.unshift(rec);
+        if (next.length > 100) next = next.slice(0, 100);
+      }
+      await s.setJSON("presets.json", next);
+      return json({ ok: true, presets: next });
     }
   }
 

@@ -75,6 +75,13 @@
             <button role="tab" id="tabBatch" aria-selected="false">多位客戶（公版）</button>
           </div>
 
+          <div class="preset-bar">
+            <label class="field inline" for="presetSel">設定範本<select id="presetSel"></select></label>
+            <button class="small primary ink" id="btnApplyPreset">套用</button>
+            <button class="small danger" id="btnDelPreset" hidden>刪除此範本</button>
+            <span class="small" id="presetNote">套用後會帶入合約名稱、簽名框、日期位置與勾選題目。</span>
+          </div>
+
           <div class="grid3">
             <label class="field" for="fTitle">合約名稱（客戶看到的標題）<input id="fTitle"></label>
             <label class="field" for="fYear">合約年度（西元）<input id="fYear" type="number" inputmode="numeric" min="1990" max="2100"></label>
@@ -131,6 +138,11 @@
             <label class="agree" for="fSummary"><input type="checkbox" id="fSummary"><span>另外在 PDF 最後加一頁「勾選結果」（一般不需要）</span></label>
           </div>
 
+          <div class="preset-save">
+            <span class="small">設定好之後，可以存成範本，下次一鍵套用：</span>
+            <input id="presetName" placeholder="範本名稱，例如：暫繳確認函（標準）" aria-label="範本名稱">
+            <button class="small" id="btnSavePreset">另存為範本</button>
+          </div>
           <p class="err" id="saveErr" hidden></p>
           <p class="small" id="saveProgress" hidden></p>
           <div class="btns"><button id="btnCancelNew">取消</button><button class="primary ink" id="btnSave" disabled>建立連結</button></div>
@@ -212,6 +224,10 @@
         <div class="rowhead row crow"><span>序號</span><span>客戶名稱</span><span>簡稱</span><span>統一編號</span><span>組織型態</span><span id="cYearHead">狀態</span><span></span></div>
         <div class="rows" id="clientRows"></div>
         <p class="err" id="clientErr" hidden></p>
+      </div>
+      <div class="savebar" id="clientSaveBar" hidden>
+        <span id="dirtyText"></span>
+        <div class="btns"><button class="small" id="btnDiscard">放棄變更</button><button class="primary ink" id="btnSaveClients">儲存變更</button></div>
       </div>
     </section>
 

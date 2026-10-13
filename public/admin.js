@@ -45,7 +45,7 @@ $("btnLogout").onclick = () => logout("已登出。");
 
 async function enter(){
   $("loginView").hidden = true; $("app").hidden = false;
-  await Promise.all([loadCounts(), loadClients()]);
+  await Promise.all([loadCounts(), loadClients(), loadPresets()]);
   route();
 }
 
@@ -102,6 +102,10 @@ async function loadCounts(){
 /* ---------- 頁面切換（網址 #bookkeeping、#clients、#settings） ---------- */
 function route(){
   const h = (location.hash || "").slice(1);
+  if (DRAFT && VIEW === "clients" && h !== "clients"){
+    if (!confirm("客戶名單有未儲存的變更。要放棄這些變更並離開嗎？")){ history.replaceState(null, "", "#clients"); return; }
+    DRAFT = null; EDITING = null;
+  }
   if (h === "clients") return showView("clients");
   if (h === "settings") return showView("settings");
   showCat(catOf(h) ? h : "bookkeeping");
@@ -318,6 +322,7 @@ function resetEditor(){
   $("placeTools").hidden = true; $("btnSave").disabled = true; $("saveProgress").hidden = true;
   err("fileErr", ""); err("saveErr", "");
   PICKED = new Set(); renderQEd(); setMode("sig");
+  ED.preset = null; $("presetName").value = ""; fillPresets();
 }
 function updateFnPreview(){
   const n = NEW_MODE === "batch" ? "各客戶名稱" : (cleanName($("fName").value) || "客戶名稱");
@@ -410,6 +415,7 @@ $("fFile").onchange = async e => {
   if (!$("fTitle").value){ $("fTitle").value = f.name.replace(/\.pdf$/i, ""); updateFnPreview(); }
   $("placeTools").hidden = false;
   await loadPage(ED.doc.numPages - 1);
+  if (ED.preset) await applyPlacement(ED.preset);
   renderQEd();
   $("btnSave").disabled = false;
 };
@@ -524,6 +530,88 @@ $("btnAddQ").onclick = () => {
   renderQEd(); $(`qT${ED.questions.length - 1}`).focus();
 };
 
+
+/* ---------- 設定範本：簽名框、日期位置、勾選題目（含打勾位置） ---------- */
+let PRESETS = [];
+async function loadPresets(){
+  try { const r = await api("presets"); if (r.ok) PRESETS = (await r.json()).presets || []; } catch {}
+}
+const lastPresetKey = () => "esign.preset." + CAT;
+function fillPresets(){
+  const sel = $("presetSel"); sel.innerHTML = "";
+  const none = document.createElement("option"); none.value = ""; none.textContent = "不使用範本"; sel.append(none);
+  const mine = PRESETS.filter(p => p.category === CAT), others = PRESETS.filter(p => p.category !== CAT);
+  for (const [label, list] of [[catOf(CAT) ? catOf(CAT).label : "本模組", mine], ["其他模組", others]]){
+    if (!list.length) continue;
+    const g = document.createElement("optgroup"); g.label = label;
+    for (const p of list){ const o = document.createElement("option"); o.value = p.id; o.textContent = p.name + (p.category !== CAT && catOf(p.category) ? `（${catOf(p.category).label}）` : ""); g.append(o); }
+    sel.append(g);
+  }
+  let last = ""; try { last = localStorage.getItem(lastPresetKey()) || ""; } catch {}
+  sel.value = PRESETS.some(p => p.id === last) ? last : (mine[0] ? mine[0].id : "");
+  $("btnDelPreset").hidden = !sel.value;
+}
+$("presetSel").onchange = () => { $("btnDelPreset").hidden = !$("presetSel").value; delete $("btnDelPreset").dataset.armed; $("btnDelPreset").textContent = "刪除此範本"; };
+$("btnApplyPreset").onclick = async () => {
+  const p = PRESETS.find(x => x.id === $("presetSel").value);
+  if (!p) { ED.preset = null; toast("沒有選擇範本"); return; }
+  try { localStorage.setItem(lastPresetKey(), p.id); } catch {}
+  if (p.title) { $("fTitle").value = p.title; updateFnPreview(); }
+  $("fSummary").checked = !!p.summary;
+  ED.questions = p.questions.map(q => ({ q: q.q, multi: q.multi, required: q.required, options: q.options.map(o => ({ t: o.t, mark: null })) }));
+  ED.preset = p;
+  renderQEd();
+  if (ED.doc) { await applyPlacement(p); toast(`已套用「${p.name}」`); }
+  else toast(`已套用「${p.name}」的題目。上傳 PDF 後會自動放好簽名框與打勾位置`, 4500);
+  $("presetName").value = p.name;
+};
+/* 把範本的位置套到目前的 PDF：範本是在最後一頁簽名的，就放到這份 PDF 的最後一頁 */
+async function applyPlacement(p){
+  const last = ED.doc.numPages - 1;
+  const map = pg => (p.sigLast && pg === p.sig.page) ? last : Math.min(pg, last);
+  ED.sig = { ...p.sig, page: p.sigLast ? last : Math.min(p.sig.page, last) };
+  $("fW").value = ED.sig.w; $("fH").value = ED.sig.h;
+  ED.date = p.date ? { ...p.date, page: p.dateLast ? last : map(p.date.page) } : null;
+  $("fDate").checked = !!p.date;
+  p.questions.forEach((pq, qi) => {
+    const q = ED.questions[qi]; if (!q) return;
+    pq.options.forEach((po, oi) => { const o = q.options[oi]; if (o) o.mark = po.mark ? { ...po.mark, page: map(po.mark.page) } : null; });
+  });
+  $("fPage").value = ED.sig.page;
+  await loadPage(ED.sig.page);
+  clampSig(); renderQEd(); drawMarks();
+}
+$("btnSavePreset").onclick = async () => {
+  const name = $("presetName").value.trim();
+  if (!name) { toast("請先輸入範本名稱"); $("presetName").focus(); return; }
+  if (!ED.doc || !ED.sig) { toast("請先上傳 PDF 並放好簽名框，再存成範本"); return; }
+  const r = v => Math.round(v * 10) / 10, last = ED.doc.numPages - 1;
+  const questions = ED.questions.filter(q => q.q.trim()).map(q => ({ q: q.q.trim(), multi: !!q.multi, required: !!q.required,
+    options: q.options.filter(o => o.t.trim()).map(o => ({ t: o.t.trim(), mark: o.mark ? { page: o.mark.page, x: r(o.mark.x), y: r(o.mark.y) } : null })) }));
+  const preset = { id: (PRESETS.find(p => p.name === name && p.category === CAT) || {}).id, name, category: CAT, title: $("fTitle").value.trim(),
+    sig: { page: ED.sig.page, x: r(ED.sig.x), y: r(ED.sig.y), w: r(ED.sig.w), h: r(ED.sig.h) }, sigLast: ED.sig.page === last,
+    date: ED.date ? { page: ED.date.page, x: r(ED.date.x), y: r(ED.date.y) } : null, dateLast: !!ED.date && ED.date.page === last,
+    questions, summary: $("fSummary").checked };
+  $("btnSavePreset").disabled = true;
+  try {
+    const res = await api("presets", { method: "POST", body: JSON.stringify({ preset }) });
+    if (!res.ok) throw new Error(res.status);
+    PRESETS = (await res.json()).presets;
+    const saved = PRESETS.find(p => p.name === name && p.category === CAT);
+    try { if (saved) localStorage.setItem(lastPresetKey(), saved.id); } catch {}
+    fillPresets(); toast(preset.id ? `已更新範本「${name}」` : `已存成範本「${name}」`);
+  } catch (e) { if (!quiet(e)) toast("儲存範本失敗，請再試一次"); }
+  finally { $("btnSavePreset").disabled = false; }
+};
+$("btnDelPreset").onclick = async () => {
+  const b = $("btnDelPreset"), id = $("presetSel").value; if (!id) return;
+  if (!b.dataset.armed){ b.dataset.armed = "1"; b.textContent = "確定刪除？"; setTimeout(() => { delete b.dataset.armed; b.textContent = "刪除此範本"; }, 4000); return; }
+  try {
+    const res = await api("presets", { method: "POST", body: JSON.stringify({ deleteId: id }) });
+    if (!res.ok) throw new Error(res.status);
+    PRESETS = (await res.json()).presets; fillPresets(); toast("已刪除範本");
+  } catch (e) { if (!quiet(e)) toast("刪除失敗，請再試一次"); }
+};
 
 /* ---------- 建立連結 ---------- */
 function collectMeta(){
@@ -666,58 +754,85 @@ function fillClientYears(){
 }
 const cYear = () => $("cYear").value || String(THIS_YEAR);
 
-let EDITING = null;
+/* ---------- 編輯先存在草稿，按「儲存變更」才寫回 ---------- */
+let EDITING = null, DRAFT = null;
+const LIST = () => DRAFT || CLIENTS;
+const plain = c => { const { _o, ...rest } = c; return rest; };
+function mutate(fn){
+  if (!DRAFT) DRAFT = CLIENTS.map(c => ({ ...c, status: { ...(c.status || {}) }, _o: JSON.stringify(c) }));
+  fn(DRAFT); renderClients();
+}
+function dirtyInfo(){
+  if (!DRAFT) return { changed: 0, added: 0, removed: 0, total: 0 };
+  let changed = 0, added = 0;
+  for (const c of DRAFT){ if (!c._o) added++; else if (c._o !== JSON.stringify(plain(c))) changed++; }
+  const removed = CLIENTS.length - DRAFT.filter(c => c._o).length;
+  return { changed, added, removed, total: changed + added + removed };
+}
+function updateSaveBar(){
+  const d = dirtyInfo();
+  if (DRAFT && !d.total) DRAFT = null;
+  $("clientSaveBar").hidden = !DRAFT;
+  if (DRAFT) $("dirtyText").textContent = "未儲存的變更：" + [d.changed && `修改 ${d.changed} 位`, d.added && `新增 ${d.added} 位`, d.removed && `刪除 ${d.removed} 位`].filter(Boolean).join("、");
+}
+$("btnSaveClients").onclick = async () => {
+  if (!DRAFT) return;
+  $("btnSaveClients").disabled = true;
+  if (await saveClients(DRAFT.map(plain), "已儲存變更", "clientErr")){ DRAFT = null; EDITING = null; renderClients(); }
+  $("btnSaveClients").disabled = false;
+};
+$("btnDiscard").onclick = () => { DRAFT = null; EDITING = null; renderClients(); toast("已放棄變更"); };
+window.addEventListener("beforeunload", e => { if (DRAFT){ e.preventDefault(); e.returnValue = ""; } });
+
 function renderClients(){
   fillClientYears();
+  const L = LIST();
   const y = cYear(), q = $("clientFilter").value.trim().toLowerCase(), sf = $("cStatusFilter").value;
   $("cYearHead").textContent = `${y} 狀態`;
-  const live = CLIENTS.filter(c => statusOf(c, y) === "存續").length, gone = CLIENTS.filter(c => statusOf(c, y) === "終止").length;
+  const live = L.filter(c => statusOf(c, y) === "存續").length, gone = L.filter(c => statusOf(c, y) === "終止").length;
   $("clientStats").innerHTML = "";
-  for (const [n, l] of [[CLIENTS.length, "位客戶"], [live, `${y} 存續`], [gone, `${y} 終止`]]){
+  for (const [n, l] of [[L.length, "位客戶"], [live, `${y} 存續`], [gone, `${y} 終止`]]){
     const s = document.createElement("span"); const b = document.createElement("b"); b.textContent = n; s.append(b, l); $("clientStats").append(s);
   }
   // 新年度還沒設定狀態：提供「沿用前一年度」
   const prev = String(+y - 1);
-  const prevLive = CLIENTS.filter(c => statusOf(c, prev) === "存續");
-  const show = CLIENTS.length && !CLIENTS.some(c => statusOf(c, y)) && prevLive.length;
+  const prevLive = L.filter(c => statusOf(c, prev) === "存續");
+  const show = L.length && !L.some(c => statusOf(c, y)) && prevLive.length;
   $("carryBox").hidden = !show;
   if (show){
-    $("carryText").textContent = `${y} 年度還沒有設定客戶狀態。可以先沿用 ${prev} 年度：${prev} 年度存續的 ${prevLive.length} 位設為 ${y} 存續，其餘設為終止，之後再個別調整。`;
+    $("carryText").textContent = `${y} 年度還沒有設定客戶狀態。可以先沿用 ${prev} 年度：${prev} 年度存續的 ${prevLive.length} 位設為 ${y} 存續，其餘設為終止，之後再個別調整（記得按最下方「儲存變更」）。`;
     $("btnCarry").textContent = `沿用 ${prev} 年度狀態`;
   }
 
   const box = $("clientRows"); box.innerHTML = "";
-  const list = CLIENTS.map((c, i) => [c, i]).filter(([c]) => {
+  const list = L.map((c, i) => [c, i]).filter(([c]) => {
     const st = statusOf(c, y);
     if (sf === "none" ? st : (sf && st !== sf)) return false;
     return !q || [c.code, c.name, c.short, c.taxId, c.org].some(v => (v || "").toLowerCase().includes(q));
   });
-  if (!list.length){ const e = document.createElement("div"); e.className = "empty"; e.textContent = CLIENTS.length ? "沒有符合的客戶。" : "還沒有客戶。按「匯入 Excel 名單」一次加入整份名單。"; box.append(e); return; }
+  if (!list.length){ const e = document.createElement("div"); e.className = "empty"; e.textContent = L.length ? "沒有符合的客戶。" : "還沒有客戶。按「匯入 Excel 名單」一次加入整份名單。"; box.append(e); updateSaveBar(); return; }
   for (const [c, i] of list){
-    const row = document.createElement("div"); row.className = "row crow";
+    const row = document.createElement("div");
+    const isNew = DRAFT && !c._o, isChanged = DRAFT && c._o && c._o !== JSON.stringify(plain(c));
+    row.className = "row crow" + (isNew || isChanged ? " dirty" : "");
     const acts = document.createElement("div"); acts.className = "acts";
     const mk = (label, fn, cls) => { const x = document.createElement("button"); x.className = "small" + (cls ? " " + cls : ""); x.textContent = label; x.onclick = () => fn(x); acts.append(x); };
-    // 年度狀態：直接在清單上切換，馬上儲存
     const stSel = document.createElement("select"); stSel.setAttribute("aria-label", `${c.name} ${y} 年度狀態`);
     for (const [v, t] of [["", "未設定"], ["存續", "存續"], ["終止", "終止"]]){ const o = document.createElement("option"); o.value = v; o.textContent = t; stSel.append(o); }
     stSel.value = statusOf(c, y);
     stSel.className = "st " + (stSel.value === "存續" ? "live" : stSel.value === "終止" ? "gone" : "none");
-    stSel.onchange = async () => {
-      const next = CLIENTS.map(x => ({ ...x, status: { ...(x.status || {}) } }));
-      if (stSel.value) next[i].status[y] = stSel.value; else delete next[i].status[y];
-      await saveClients(next, `${c.short || c.name}：${y} 年度設為${stSel.value || "未設定"}`);
-    };
+    stSel.onchange = () => mutate(D => { if (stSel.value) D[i].status[y] = stSel.value; else delete D[i].status[y]; });
     if (EDITING === i){
       const f = (k, label, w) => { const x = document.createElement("input"); x.value = c[k] || ""; x.setAttribute("aria-label", label); if (w) x.maxLength = w; return x; };
       const ins = [f("code", "序號", 20), f("name", "客戶名稱"), f("short", "簡稱"), f("taxId", "統一編號", 8), f("org", "組織型態")];
       ins[3].inputMode = "numeric"; ins[4].setAttribute("list", "orgOptions");
       row.append(...ins, stSel);
-      mk("儲存", async () => {
-        const v = { ...c, code: ins[0].value.trim(), name: ins[1].value.trim(), short: ins[2].value.trim(), taxId: ins[3].value.replace(/\D/g, ""), org: ins[4].value.trim() };
+      mk("完成", () => {
+        const v = { code: ins[0].value.trim(), name: ins[1].value.trim(), short: ins[2].value.trim(), taxId: ins[3].value.replace(/\D/g, ""), org: ins[4].value.trim() };
         if (!v.name) return toast("客戶名稱不能空白");
         if (v.taxId && v.taxId.length !== 8) return toast("統一編號要是 8 碼數字");
-        const next = CLIENTS.slice(); next[i] = v; EDITING = null;
-        await saveClients(next, "已更新", "clientErr");
+        EDITING = null;
+        mutate(D => { Object.assign(D[i], v); });
       }, "primary ink");
       mk("取消", () => { EDITING = null; renderClients(); });
     } else {
@@ -728,42 +843,42 @@ function renderClients(){
       const og = document.createElement("div"); og.className = "sub"; og.textContent = c.org || "—";
       row.append(code, n, sh, t, og, stSel);
       mk("編輯", () => { EDITING = i; renderClients(); });
-      mk("刪除", async x => {
+      mk("刪除", x => {
         if (!x.dataset.armed){ x.dataset.armed = "1"; x.textContent = "確定刪除？"; setTimeout(() => { delete x.dataset.armed; x.textContent = "刪除"; }, 4000); return; }
-        await saveClients(CLIENTS.filter((_, k) => k !== i), "已從名單刪除", "clientErr");
+        EDITING = null; mutate(D => { D.splice(i, 1); });
       }, "danger");
     }
     row.append(acts); box.append(row);
   }
+  updateSaveBar();
 }
 $("clientFilter").addEventListener("input", renderClients);
 $("cYear").onchange = renderClients;
 $("cStatusFilter").onchange = renderClients;
-$("btnCarry").onclick = async () => {
+$("btnCarry").onclick = () => {
   const y = cYear(), prev = String(+y - 1);
-  const next = CLIENTS.map(c => ({ ...c, status: { ...(c.status || {}), [y]: statusOf(c, prev) === "存續" ? "存續" : "終止" } }));
-  $("btnCarry").disabled = true;
-  await saveClients(next, `已建立 ${y} 年度狀態`);
-  $("btnCarry").disabled = false;
+  mutate(D => { for (const c of D) c.status[y] = statusOf(c, prev) === "存續" ? "存續" : "終止"; });
+  toast(`已套用 ${y} 年度狀態，請檢查後按最下方「儲存變更」`, 4000);
 };
 
 $("btnAddClient").onclick = () => {
   $("addClientBox").hidden = false; $("importBox").hidden = true;
-  $("addClientYear").textContent = `新增的客戶會設為 ${cYear()} 年度「存續」。`;
+  $("addClientYear").textContent = `新增的客戶會設為 ${cYear()} 年度「存續」，加入後請按最下方「儲存變更」。`;
   $("cName").focus();
 };
 $("cCancel").onclick = () => { $("addClientBox").hidden = true; };
-$("cSave").onclick = async () => {
+$("cSave").onclick = () => {
+  err("addClientErr", "");
   const v = { code: $("cCode").value.trim(), name: $("cName").value.trim(), short: $("cShort").value.trim(),
     taxId: $("cTax").value.replace(/\D/g, ""), org: $("cOrg").value.trim(), status: { [cYear()]: "存續" } };
   if (!v.name) return err("addClientErr", "請填客戶名稱。");
   if (v.taxId && v.taxId.length !== 8) return err("addClientErr", "統一編號要是 8 碼數字，或留空。");
-  if (v.code && CLIENTS.some(c => c.code === v.code)) return err("addClientErr", "名單裡已經有這個序號。");
-  if (v.taxId && CLIENTS.some(c => c.taxId === v.taxId)) return err("addClientErr", "名單裡已經有這個統一編號。");
-  if (await saveClients([...CLIENTS, v], `已加入「${v.name}」`, "addClientErr")){
-    for (const id of ["cCode", "cName", "cShort", "cTax", "cOrg"]) $(id).value = "";
-    $("addClientBox").hidden = true;
-  }
+  if (v.code && LIST().some(c => c.code === v.code)) return err("addClientErr", "名單裡已經有這個序號。");
+  if (v.taxId && LIST().some(c => c.taxId === v.taxId)) return err("addClientErr", "名單裡已經有這個統一編號。");
+  mutate(D => { D.push(v); });
+  for (const id of ["cCode", "cName", "cShort", "cTax", "cOrg"]) $(id).value = "";
+  $("addClientBox").hidden = true;
+  toast(`已加入「${v.name}」，請按最下方「儲存變更」`, 4000);
 };
 
 /* ---------- 匯入：Excel 檔、CSV，或從 Excel 複製貼上 ---------- */
@@ -850,6 +965,7 @@ $("importFile").onchange = async e => {
   showImportPreview();
 };
 $("importSave").onclick = async () => {
+  if (DRAFT) return err("importErr", "名單有未儲存的變更，請先按最下方「儲存變更」或「放棄變更」再匯入。");
   const replace = document.querySelector('input[name="importMode"]:checked').value === "replace";
   let next;
   if (replace) next = IMPORT;
