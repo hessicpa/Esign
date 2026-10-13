@@ -1,9 +1,19 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { store, json, pdfResponse, isPdf, cleanMeta, ID_RE, MAX_PDF } from "../lib/common.mjs";
+import { store, json, pdfResponse, isPdf, cleanMeta, cleanClient, mapLimit, ixKey, pdfKeyOf,
+  CATEGORIES, ID_RE, MAX_PDF } from "../lib/common.mjs";
 
-/* 管理後台 API。每個請求都要在 x-admin-key 標頭帶上管理密碼，
-   密碼設定在 Netlify 的環境變數 ADMIN_PASSWORD。
-   ?a=ping | list | create | delete | signed | pdf | reopen | settings */
+/* 管理後台 API。每個請求都要在 x-admin-key 標頭帶上管理密碼（Netlify 環境變數 ADMIN_PASSWORD）。
+   ?a=ping                       確認密碼
+   ?a=counts                     各類別的合約數與尚未簽核數
+   ?a=list&cat=<類別>[&year=]     某類別的合約清單
+   ?a=create        (POST form)  單一客戶：meta + pdf
+   ?a=template      (POST form)  上傳公版 PDF，回傳 tplId
+   ?a=batch         (POST json)  公版：{ tplId, meta, clients:[{name,short,taxId}] }，一次最多 50 位
+   ?a=delete&c=     (POST)       刪除合約
+   ?a=signed|pdf&c=              下載已簽／原始 PDF
+   ?a=reopen&c=&on=1|0 (POST)    開放／取消開放重簽
+   ?a=clients       (GET/POST)   客戶名單
+   ?a=settings      (POST)       事務所名稱 */
 const sha = s => createHash("sha256").update(String(s)).digest();
 function authorized(req) {
   const pw = process.env.ADMIN_PASSWORD || "";
@@ -11,6 +21,35 @@ function authorized(req) {
   return pw.length > 0 && timingSafeEqual(sha(pw), sha(got));
 }
 const fileName = m => `${m.name}_${m.title}.pdf`.replace(/[\\/:*?"<>|]/g, "");
+const newId = () => randomBytes(18).toString("base64url");
+const BATCH_MAX = 50;
+
+/* 改版前建立的合約沒有類別與索引：第一次進後台時補上（歸到「未分類」） */
+async function ensureIndex(s) {
+  if (await s.get("ixv1")) return;
+  const { blobs } = await s.list({ prefix: "contracts/" });
+  await mapLimit(blobs, 20, async b => {
+    const m = await s.get(b.key, { type: "json" });
+    if (!m) return;
+    if (!m.category) {
+      m.category = "uncat";
+      m.year = m.year || new Date(m.created || Date.now()).getFullYear();
+      m.short = m.short || ""; m.taxId = m.taxId || "";
+      await s.setJSON(b.key, m);
+    }
+    await s.set(ixKey(m, !!m.signedAt), "1");
+  });
+  await s.set("ixv1", "1");
+}
+
+async function newContract(s, base, client, pdfKey) {
+  const id = newId();
+  const rec = { id, ...base, name: client.name, short: client.short, taxId: client.taxId,
+    created: new Date().toISOString(), signedAt: null, ...(pdfKey ? { pdfKey } : {}) };
+  await s.setJSON(`contracts/${id}.json`, rec);
+  await s.set(ixKey(rec, false), "1");
+  return rec;
+}
 
 export default async (req) => {
   if (!process.env.ADMIN_PASSWORD) return json({ error: "no_password_set" }, 503);
@@ -25,12 +64,31 @@ export default async (req) => {
 
   if (a === "ping") return json({ ok: true });
 
-  if (a === "list" && req.method === "GET") {
-    const { blobs } = await s.list({ prefix: "contracts/" });
-    const items = (await Promise.all(blobs.map(b => s.get(b.key, { type: "json" })))).filter(Boolean);
-    items.sort((x, y) => (y.created || "").localeCompare(x.created || ""));
+  if (a === "counts" && req.method === "GET") {
+    await ensureIndex(s);
+    const { blobs } = await s.list({ prefix: "ix/" });
+    const counts = {};
+    for (const b of blobs) {
+      const [, cat, , st] = b.key.split("/");
+      const c = counts[cat] || (counts[cat] = { total: 0, pending: 0 });
+      c.total++; if (st === "p") c.pending++;
+    }
     const settings = (await s.get("settings.json", { type: "json" })) || {};
-    return json({ contracts: items, settings });
+    const clients = (await s.get("clients.json", { type: "json" })) || [];
+    return json({ counts, settings, clientCount: clients.length });
+  }
+
+  if (a === "list" && req.method === "GET") {
+    await ensureIndex(s);
+    const cat = url.searchParams.get("cat") || "";
+    if (!CATEGORIES.includes(cat)) return json({ error: "bad_request" }, 400);
+    const year = url.searchParams.get("year");
+    const prefix = `ix/${cat}/` + (year && /^\d{4}$/.test(year) ? `${year}/` : "");
+    const { blobs } = await s.list({ prefix });
+    const ids = [...new Set(blobs.map(b => b.key.split("/").pop()))];
+    const items = (await mapLimit(ids, 40, i => s.get(`contracts/${i}.json`, { type: "json" }))).filter(Boolean);
+    items.sort((x, y) => (y.created || "").localeCompare(x.created || ""));
+    return json({ contracts: items });
   }
 
   if (a === "create" && req.method === "POST") {
@@ -43,24 +101,56 @@ export default async (req) => {
     const buf = await file.arrayBuffer();
     if (buf.byteLength > MAX_PDF) return json({ error: "too_large" }, 413);
     if (!isPdf(buf)) return json({ error: "not_pdf" }, 400);
-    const newId = randomBytes(18).toString("base64url");
-    const rec = { id: newId, ...meta, created: new Date().toISOString(), signedAt: null };
-    await s.set(`pdf/${newId}`, buf);
-    await s.setJSON(`contracts/${newId}.json`, rec);
+    const { name, short, taxId, ...base } = meta;
+    const rec = await newContract(s, base, { name, short, taxId }, null);
+    await s.set(`pdf/${rec.id}`, buf);
     return json({ ok: true, contract: rec });
+  }
+
+  if (a === "template" && req.method === "POST") {
+    let form;
+    try { form = await req.formData(); } catch { return json({ error: "bad_request" }, 400); }
+    const file = form.get("pdf");
+    if (!file || typeof file.arrayBuffer !== "function") return json({ error: "no_pdf" }, 400);
+    const buf = await file.arrayBuffer();
+    if (buf.byteLength > MAX_PDF) return json({ error: "too_large" }, 413);
+    if (!isPdf(buf)) return json({ error: "not_pdf" }, 400);
+    const tplId = newId();
+    await s.set(`tpl/${tplId}`, buf);
+    return json({ ok: true, tplId });
+  }
+
+  if (a === "batch" && req.method === "POST") {
+    let body;
+    try { body = await req.json(); } catch { return json({ error: "bad_request" }, 400); }
+    if (!ID_RE.test(body.tplId || "")) return json({ error: "bad_request" }, 400);
+    if (!(await s.get(`tpl/${body.tplId}`, { type: "arrayBuffer" }))) return json({ error: "no_template" }, 400);
+    const clients = (Array.isArray(body.clients) ? body.clients : []).map(cleanClient).filter(Boolean);
+    if (!clients.length || clients.length > BATCH_MAX) return json({ error: "bad_clients" }, 400);
+    let base;
+    try { base = cleanMeta({ ...body.meta, name: clients[0].name }); } catch { return json({ error: "bad_meta" }, 400); }
+    delete base.name; delete base.short; delete base.taxId;
+    const created = await mapLimit(clients, 10, c => newContract(s, base, c, `tpl/${body.tplId}`));
+    return json({ ok: true, contracts: created });
   }
 
   if (a === "delete" && req.method === "POST") {
     if (!ID_RE.test(id)) return json({ error: "not_found" }, 404);
-    await Promise.all([s.delete(`contracts/${id}.json`), s.delete(`pdf/${id}`), s.delete(`signed/${id}`)]);
+    const meta = await s.get(`contracts/${id}.json`, { type: "json" });
+    if (!meta) return json({ ok: true });
+    const jobs = [s.delete(`contracts/${id}.json`), s.delete(`signed/${id}`),
+      s.delete(ixKey(meta, false)), s.delete(ixKey(meta, true))];
+    if (!meta.pdfKey) jobs.push(s.delete(`pdf/${id}`));   // 公版 PDF 由其他客戶共用，不刪
+    await Promise.all(jobs);
     return json({ ok: true });
   }
 
   if ((a === "signed" || a === "pdf") && req.method === "GET") {
     if (!ID_RE.test(id)) return json({ error: "not_found" }, 404);
     const meta = await s.get(`contracts/${id}.json`, { type: "json" });
-    const buf = await s.get(`${a === "signed" ? "signed" : "pdf"}/${id}`, { type: "arrayBuffer" });
-    if (!meta || !buf) return json({ error: "not_found" }, 404);
+    if (!meta) return json({ error: "not_found" }, 404);
+    const buf = await s.get(a === "signed" ? `signed/${id}` : pdfKeyOf(meta), { type: "arrayBuffer" });
+    if (!buf) return json({ error: "not_found" }, 404);
     return pdfResponse(buf, fileName(meta));
   }
 
@@ -72,6 +162,23 @@ export default async (req) => {
     meta.resignAllowed = url.searchParams.get("on") === "1";
     await s.setJSON(`contracts/${id}.json`, meta);
     return json({ ok: true, contract: meta });
+  }
+
+  if (a === "clients") {
+    if (req.method === "GET") return json({ clients: (await s.get("clients.json", { type: "json" })) || [] });
+    if (req.method === "POST") {
+      let body;
+      try { body = await req.json(); } catch { return json({ error: "bad_request" }, 400); }
+      const seen = new Set(), list = [];
+      for (const c of (Array.isArray(body.clients) ? body.clients : []).slice(0, 5000).map(cleanClient)) {
+        if (!c) continue;
+        const k = c.taxId || "n:" + c.name;
+        if (seen.has(k)) continue;
+        seen.add(k); list.push(c);
+      }
+      await s.setJSON("clients.json", list);
+      return json({ ok: true, clients: list });
+    }
   }
 
   if (a === "settings" && req.method === "POST") {

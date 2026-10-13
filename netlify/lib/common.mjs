@@ -1,10 +1,13 @@
 import { getStore } from "@netlify/blobs";
 
 /* 所有資料都放在 Netlify Blobs 的 "esign" 儲存區：
-   contracts/<id>.json  合約設定（客戶名稱、標題、簽名位置、題目、簽署時間）
-   pdf/<id>             原始 PDF
-   signed/<id>          客戶簽好的 PDF
-   settings.json        事務所名稱、LINE ID */
+   contracts/<id>.json            合約設定（客戶、類別、年度、標題、簽名位置、題目、簽署時間）
+   pdf/<id>                       單一客戶上傳的原始 PDF
+   tpl/<tplId>                    公版 PDF（多位客戶共用，合約設定裡的 pdfKey 指向它）
+   signed/<id>                    客戶簽好的 PDF
+   ix/<類別>/<年度>/<p|s>/<id>      清單索引（p＝尚未簽核、s＝已簽核），列清單時只讀這些鍵名
+   clients.json                   客戶名單
+   settings.json                  事務所名稱 */
 export const store = () => getStore({ name: "esign", consistency: "strong" });
 
 export const ID_RE = /^[A-Za-z0-9_-]{16,40}$/;
@@ -42,6 +45,30 @@ export function canResign(meta, now = Date.now()) {
   return now <= lockAt(meta);
 }
 
+/* 合約類別（左側模組）；uncat 是改版前建立、沒有類別的舊合約 */
+export const CATEGORIES = ["bookkeeping", "registration", "withholding", "provisional", "nonop", "settlement", "uncat"];
+export const ixKey = (m, signed) => `ix/${m.category || "uncat"}/${m.year || 0}/${signed ? "s" : "p"}/${m.id}`;
+export const pdfKeyOf = m => m.pdfKey || `pdf/${m.id}`;
+export const TAXID_RE = /^\d{8}$/;
+
+/* 依序處理一批工作，同時最多 n 個 */
+export async function mapLimit(arr, n, fn) {
+  const out = new Array(arr.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, arr.length) }, async () => {
+    while (i < arr.length) { const k = i++; out[k] = await fn(arr[k], k); }
+  }));
+  return out;
+}
+
+/* 客戶名單的一筆：名稱必填，統編 8 碼數字或空白 */
+export function cleanClient(c) {
+  const name = typeof c?.name === "string" ? c.name.trim().slice(0, 100) : "";
+  const short = typeof c?.short === "string" ? c.short.trim().slice(0, 40) : "";
+  let taxId = typeof c?.taxId === "string" || typeof c?.taxId === "number" ? String(c.taxId).replace(/\D/g, "").slice(0, 8) : "";
+  if (taxId && !TAXID_RE.test(taxId)) taxId = "";
+  return name ? { name, short, taxId } : null;
+}
+
 const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const num = (v, lo, hi) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : null);
 const pt = (o, pages) => {
@@ -67,5 +94,8 @@ export function cleanMeta(m) {
       .map(o => ({ t: str(o && o.t, 300), mark: o && o.mark ? pt(o.mark, 999) : null }))
       .filter(o => o.t),
   })).filter(q => q.q && q.options.length);
-  return { name, title, sig, date, questions, summary: m.summary !== false };
+  const category = CATEGORIES.includes(m.category) ? m.category : "uncat";
+  const year = Math.round(num(m.year, 1990, 2100) ?? new Date().getFullYear());
+  const client = cleanClient({ name, short: m.short, taxId: m.taxId });
+  return { name, short: client.short, taxId: client.taxId, category, year, title, sig, date, questions, summary: m.summary === true };
 }

@@ -4,88 +4,232 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>合約簽署後台</title>
+<title>合約暨文件線上簽署系統｜禾識會計師事務所</title>
+<link rel="icon" href="logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap">
 <link rel="stylesheet" href="app.css">
-<style>html,body{margin:0}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}img{max-width:100%}[hidden]{display:none!important}</style>
+<link rel="stylesheet" href="admin.css">
 </head>
-<body>
-<div class="wrap">
-  <header>
-    <div class="topline"><div class="firm" id="aFirm">管理後台</div><button class="small" id="btnLogout" hidden>登出</button></div>
-    <h1>合約簽署後台</h1>
-    <p class="hint">上傳 PDF、點出簽名位置，就會產生給客戶的專屬連結。客戶簽完的 PDF 會自動出現在下方清單。</p>
-  </header>
-  <div class="cards">
-    <div class="card" id="loginBox">
-      <h2>請輸入管理密碼</h2>
-      <p class="small">就是你在 Netlify 設定的 ADMIN_PASSWORD。</p>
-      <label class="field" for="pwIn">管理密碼<input id="pwIn" type="password" autocomplete="current-password"></label>
-      <p class="err" id="loginErr" hidden></p>
-      <div class="btns"><button class="primary" id="btnLogin">進入後台</button></div>
-    </div>
+<body class="admin">
 
-    <div id="adminBody" class="cards" hidden>
-      <div class="card" id="newCard">
-        <div class="btns"><button class="primary" id="btnNew">＋ 新增合約</button></div>
-      </div>
-
-      <div class="card" id="editor" hidden>
-        <h2>新增合約</h2>
-        <div class="grid2">
-          <label class="field" for="fName">客戶名稱<input id="fName" placeholder="例如：王小明"></label>
-          <label class="field" for="fTitle">合約名稱（客戶看到的標題）<input id="fTitle" placeholder="例如：記帳及稅務代理委任契約書"></label>
-        </div>
-        <p class="small" id="fnPreview">客戶下載的檔名會是：客戶名稱_合約名稱.pdf</p>
-        <label class="field" for="fFile">合約 PDF（4 MB 以內）<input id="fFile" type="file" accept="application/pdf,.pdf"></label>
-        <p class="err" id="fileErr" hidden></p>
-        <div id="placeTools" hidden class="cards">
-          <div class="grid2">
-            <label class="field" for="fPage">顯示第幾頁<select id="fPage"></select></label>
-            <div class="field">在頁面上點一下，放到：
-              <div class="chips"><button class="chip" id="modeSig" aria-pressed="true">紅框：簽名位置</button><button class="chip" id="modeDate" aria-pressed="false">藍線：日期位置</button></div>
-            </div>
-          </div>
-          <p class="small" id="placeStatus"></p>
-          <label class="agree" for="fDate"><input type="checkbox" id="fDate" checked><span>自動填上簽署日期</span></label>
-          <div class="sliders">
-            <label class="field" for="fW">簽名框寬度<input id="fW" type="range" min="80" max="320" value="180"></label>
-            <label class="field" for="fH">簽名框高度<input id="fH" type="range" min="30" max="160" value="70"></label>
-          </div>
-          <div class="place" id="place"><canvas id="placeCanvas"></canvas><div class="mark sig" id="markSig">簽名</div><div class="mark date" id="markDate"></div></div>
-          <p class="small">簽名會縮放後置中放進紅框。框的正下方會再加一行小字的電子簽署時間。</p>
-        </div>
-        <div class="cards" id="qEditorWrap">
-          <h2>勾選題目（選填）</h2>
-          <p class="small">需要客戶勾選的項目可以在這裡出題，客戶必須先回答必填題才能簽名。請替每個選項按「在 PDF 上標位置」，點在 PDF 印好的 □ 方框上，客戶勾到的選項就會在那裡打 ✓。</p>
-          <div id="qEd" class="cards"></div>
-          <div class="btns"><button class="small" id="btnAddQ">＋ 新增題目</button></div>
-          <label class="agree" for="fSummary"><input type="checkbox" id="fSummary"><span>另外在 PDF 最後加一頁「勾選結果」（一般不需要）</span></label>
-        </div>
-        <p class="err" id="saveErr" hidden></p>
-        <div class="btns"><button id="btnCancelNew">取消</button><button class="primary" id="btnSave" disabled>建立連結</button></div>
-      </div>
-
-      <div class="card">
-        <div class="topline"><h2>合約清單</h2><button class="small" id="btnRefresh">重新整理</button></div>
-        <ul class="list" id="list"></ul>
-        <p class="err" id="listErr" hidden></p>
-      </div>
-
-      <details class="card" id="settingsCard">
-        <summary>事務所資訊</summary>
-        <label class="field" for="sFirm">事務所名稱（顯示在簽署頁上方）<input id="sFirm"></label>
-        <p class="err" id="setErr" hidden></p>
-        <div class="btns"><button class="primary" id="btnSaveSettings">儲存</button></div>
-      </details>
-    </div>
+<!-- ===== 登入 ===== -->
+<div class="login" id="loginView">
+  <div class="login-card">
+    <img class="login-logo" src="logo.png" alt="禾識會計師事務所">
+    <div class="login-title">合約暨文件線上簽署系統</div>
+    <label class="field" for="pwIn">管理密碼<input id="pwIn" type="password" autocomplete="current-password"></label>
+    <p class="err" id="loginErr" hidden></p>
+    <div class="btns"><button class="primary ink" id="btnLogin">登入管理後台</button></div>
+    <p class="small">密碼是在 Netlify 設定的 ADMIN_PASSWORD。</p>
   </div>
+</div>
+
+<!-- ===== 後台 ===== -->
+<div class="shell" id="app" hidden>
+  <aside class="side">
+    <div class="brand"><img src="logo-white.png" alt="禾識會計師事務所"></div>
+    <nav class="nav-wrap" id="nav" aria-label="功能選單"></nav>
+    <div class="side-foot">
+      <button class="nav" data-view="settings" id="navSettings"><span class="ico" aria-hidden="true">⚙</span>系統設定</button>
+      <button class="nav" id="btnLogout"><span class="ico" aria-hidden="true">⎋</span>登出</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow" id="firmLine">禾識會計師事務所・管理後台</div>
+        <h1>合約暨文件線上簽署系統</h1>
+      </div>
+    </header>
+
+    <!-- ===== 合約模組 ===== -->
+    <section id="viewCat" hidden>
+      <div class="pagehead">
+        <span class="tone-bar" id="catTone"></span>
+        <h2 id="catTitle"></h2>
+        <div class="stats" id="catStats"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h"><h3>快速查詢</h3></div>
+        <div class="panel-b query">
+          <label class="field" for="qYear">合約年度<select id="qYear"></select></label>
+          <label class="field" for="qText">搜尋<input id="qText" type="search" placeholder="統編、客戶名稱或簡稱、合約名稱"></label>
+          <div class="btns"><button class="small" id="qClear">清除條件</button></div>
+        </div>
+      </div>
+
+      <div class="panel" id="newPanel">
+        <div class="panel-h">
+          <h3>新增合約</h3>
+          <div class="btns" id="newBtns">
+            <button class="small primary ink" id="btnNewSingle">單一客戶</button>
+            <button class="small" id="btnNewBatch">多位客戶（同一份公版 PDF）</button>
+          </div>
+        </div>
+        <div class="panel-b" id="editor" hidden>
+          <div class="seg" role="tablist" aria-label="新增方式">
+            <button role="tab" id="tabSingle" aria-selected="true">單一客戶</button>
+            <button role="tab" id="tabBatch" aria-selected="false">多位客戶（公版）</button>
+          </div>
+
+          <div class="grid3">
+            <label class="field" for="fTitle">合約名稱（客戶看到的標題）<input id="fTitle"></label>
+            <label class="field" for="fYear">合約年度（西元）<input id="fYear" type="number" inputmode="numeric" min="1990" max="2100"></label>
+          </div>
+
+          <div id="singleBox" class="grid3">
+            <label class="field" for="fName">客戶名稱<input id="fName" list="clientOptions" placeholder="輸入或從客戶名單選擇"></label>
+            <label class="field" for="fShort">簡稱<input id="fShort"></label>
+            <label class="field" for="fTaxId">統一編號<input id="fTaxId" inputmode="numeric" maxlength="8" placeholder="8 碼數字"></label>
+            <datalist id="clientOptions"></datalist>
+          </div>
+
+          <div id="batchBox" class="cards" hidden>
+            <div class="topline">
+              <strong>選擇客戶</strong>
+              <span class="small" id="pickCount">已選 0 位</span>
+            </div>
+            <div class="pick-tools">
+              <input id="pickFilter" type="search" placeholder="篩選：名稱、簡稱或統編" aria-label="篩選客戶">
+              <button class="small" id="pickAll">全選（篩選結果）</button>
+              <button class="small" id="pickNone">全部取消</button>
+            </div>
+            <div class="picklist" id="pickList"></div>
+            <p class="small" id="pickEmpty" hidden>客戶名單是空的。請先到左側「客戶名單」匯入客戶。</p>
+          </div>
+
+          <p class="small" id="fnPreview"></p>
+          <label class="field" for="fFile">合約 PDF（4 MB 以內）<input id="fFile" type="file" accept="application/pdf,.pdf"></label>
+          <p class="err" id="fileErr" hidden></p>
+
+          <div id="placeTools" hidden class="cards">
+            <div class="grid2">
+              <label class="field" for="fPage">顯示第幾頁<select id="fPage"></select></label>
+              <div class="field">在頁面上點一下，放到：
+                <div class="chips"><button class="chip" id="modeSig" aria-pressed="true">紅框：簽名位置</button><button class="chip" id="modeDate" aria-pressed="false">藍線：日期位置</button></div>
+              </div>
+            </div>
+            <p class="small" id="placeStatus"></p>
+            <label class="agree" for="fDate"><input type="checkbox" id="fDate" checked><span>自動填上簽署日期</span></label>
+            <div class="sliders">
+              <label class="field" for="fW">簽名框寬度<input id="fW" type="range" min="80" max="320" value="180"></label>
+              <label class="field" for="fH">簽名框高度<input id="fH" type="range" min="30" max="160" value="70"></label>
+            </div>
+            <div class="place" id="place"><canvas id="placeCanvas"></canvas><div class="mark sig" id="markSig">簽名</div><div class="mark date" id="markDate"></div></div>
+            <p class="small">簽名會縮放後置中放進紅框，框的正下方會再加一行小字的電子簽署時間。</p>
+          </div>
+
+          <div class="cards" id="qEditorWrap">
+            <h3 class="sub-h">勾選題目（選填）</h3>
+            <p class="small">需要客戶勾選的項目可以在這裡出題，客戶必須先回答必填題才能簽名。請替每個選項按「在 PDF 上標位置」，點在 PDF 印好的 □ 方框上，客戶勾到的選項就會在那裡打 ✓。</p>
+            <div id="qEd" class="cards"></div>
+            <div class="btns"><button class="small" id="btnAddQ">＋ 新增題目</button></div>
+            <label class="agree" for="fSummary"><input type="checkbox" id="fSummary"><span>另外在 PDF 最後加一頁「勾選結果」（一般不需要）</span></label>
+          </div>
+
+          <p class="err" id="saveErr" hidden></p>
+          <p class="small" id="saveProgress" hidden></p>
+          <div class="btns"><button id="btnCancelNew">取消</button><button class="primary ink" id="btnSave" disabled>建立連結</button></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">
+          <h3><span class="dot ok"></span>已簽核完成 <span class="num" id="nSigned">0</span></h3>
+          <div class="btns"><button class="small" id="btnZip">下載全部已簽 PDF（ZIP）</button></div>
+        </div>
+        <div class="rows" id="rowsSigned"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">
+          <h3><span class="dot wait"></span>尚未簽核 <span class="num" id="nPending">0</span></h3>
+          <div class="btns"><button class="small" id="btnExport">匯出連結清單（Excel）</button></div>
+        </div>
+        <div class="rows" id="rowsPending"></div>
+      </div>
+      <p class="err" id="listErr" hidden></p>
+    </section>
+
+    <!-- ===== 客戶名單 ===== -->
+    <section id="viewClients" hidden>
+      <div class="pagehead"><span class="tone-bar" style="--tone:var(--tone-ink)"></span><h2>客戶名單</h2><div class="stats" id="clientStats"></div></div>
+
+      <div class="panel">
+        <div class="panel-h">
+          <h3>新增與匯入</h3>
+          <div class="btns">
+            <button class="small primary ink" id="btnAddClient">新增一位客戶</button>
+            <button class="small" id="btnImport">從 Excel 貼上匯入</button>
+          </div>
+        </div>
+        <div class="panel-b" id="addClientBox" hidden>
+          <div class="grid3">
+            <label class="field" for="cName">客戶名稱<input id="cName"></label>
+            <label class="field" for="cShort">簡稱<input id="cShort"></label>
+            <label class="field" for="cTax">統一編號<input id="cTax" inputmode="numeric" maxlength="8"></label>
+          </div>
+          <p class="err" id="addClientErr" hidden></p>
+          <div class="btns"><button id="cCancel">取消</button><button class="primary ink" id="cSave">加入名單</button></div>
+        </div>
+        <div class="panel-b" id="importBox" hidden>
+          <p class="small">在 Excel 選取三欄「客戶名稱、簡稱、統編」（可含標題列）複製後，貼在下面。也可以選擇 CSV 檔。</p>
+          <textarea id="importText" rows="8" placeholder="甲公司有限公司	甲公司	12345678"></textarea>
+          <label class="field" for="importFile">或選擇 CSV 檔<input id="importFile" type="file" accept=".csv,text/csv"></label>
+          <div class="radios">
+            <label><input type="radio" name="importMode" value="merge" checked> 加入名單（統編相同的會更新）</label>
+            <label><input type="radio" name="importMode" value="replace"> 全部取代成這份名單</label>
+          </div>
+          <p class="small" id="importPreview"></p>
+          <p class="err" id="importErr" hidden></p>
+          <div class="btns"><button id="importCancel">取消</button><button class="primary ink" id="importSave" disabled>匯入</button></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">
+          <h3>全部客戶</h3>
+          <input id="clientFilter" type="search" class="inline-search" placeholder="搜尋名稱、簡稱或統編" aria-label="搜尋客戶">
+        </div>
+        <div class="rowhead crow"><span>客戶名稱</span><span>簡稱</span><span>統一編號</span><span></span></div>
+        <div class="rows" id="clientRows"></div>
+        <p class="err" id="clientErr" hidden></p>
+      </div>
+    </section>
+
+    <!-- ===== 系統設定 ===== -->
+    <section id="viewSettings" hidden>
+      <div class="pagehead"><span class="tone-bar" style="--tone:var(--tone-ink)"></span><h2>系統設定</h2></div>
+      <div class="panel">
+        <div class="panel-h"><h3>事務所資訊</h3></div>
+        <div class="panel-b">
+          <label class="field" for="sFirm">事務所名稱（顯示在客戶簽署頁上方）<input id="sFirm"></label>
+          <p class="err" id="setErr" hidden></p>
+          <div class="btns"><button class="primary ink" id="btnSaveSettings">儲存</button></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-h"><h3>使用須知</h3></div>
+        <div class="panel-b">
+          <ul class="notes">
+            <li>客戶簽完 1 小時內可自行重新簽署；超過 1 小時合約即歸檔，需在清單中按「開放重簽」。</li>
+            <li>每份 PDF 需在 4 MB 以內。公版 PDF 只存一份，供所有選定客戶共用。</li>
+            <li>網站每次更新部署會使用 Netlify 點數，功能調整請集中一次上傳。</li>
+            <li>已簽檔案下載存檔後，可刪除舊年度合約以節省空間；刪除後該連結即失效。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
 <div class="toast" id="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
 <script src="common.js"></script>
 <script src="admin.js"></script>

@@ -1,4 +1,4 @@
-import { store, json, pdfResponse, isPdf, ID_RE, MAX_SIGNED, canResign, lockAt } from "../lib/common.mjs";
+import { store, json, pdfResponse, isPdf, ID_RE, MAX_SIGNED, canResign, lockAt, ixKey, pdfKeyOf } from "../lib/common.mjs";
 
 /* 客戶端 API（不用登入，靠連結裡的合約代碼辨識）
    GET  /api/c?c=<id>              合約資訊（標題、簽名位置、題目、簽署狀態）
@@ -25,7 +25,7 @@ export default async (req) => {
   }
 
   if (req.method === "GET" && f === "pdf") {
-    const buf = await s.get(`pdf/${id}`, { type: "arrayBuffer" });
+    const buf = await s.get(pdfKeyOf(meta), { type: "arrayBuffer" });
     return buf ? pdfResponse(buf) : json({ error: "not_found" }, 404);
   }
 
@@ -46,11 +46,16 @@ export default async (req) => {
     await s.set(`signed/${id}`, buf);
     const now = new Date().toISOString();
     // 第一次簽、或管理人員開放重簽後的這次簽署，重新起算 1 小時
-    if (!meta.signedAt || meta.resignAllowed) meta.firstSignedAt = now;
+    const firstTime = !meta.signedAt;
+    if (firstTime || meta.resignAllowed) meta.firstSignedAt = now;
     meta.resignAllowed = false;
     meta.signedAt = now;
     meta.signCount = (meta.signCount || 0) + 1;
     await s.setJSON(`contracts/${id}.json`, meta);
+    if (firstTime) {   // 清單索引：從「尚未簽核」移到「已簽核完成」
+      await s.set(ixKey(meta, true), "1");
+      await s.delete(ixKey(meta, false));
+    }
     return json({ ok: true, signedAt: now, canResign: canResign(meta), lockAt: new Date(lockAt(meta)).toISOString() });
   }
 
