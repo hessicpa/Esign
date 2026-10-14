@@ -18,11 +18,11 @@
   <div class="login-card">
     <img class="login-logo" src="logo.png" alt="禾識會計師事務所">
     <div class="login-title">電子文件簽署系統</div>
+    <label class="field" for="devIn">使用者名稱<input id="devIn" maxlength="40" autocomplete="username" placeholder="例如 Carrie"></label>
     <label class="field" for="pwIn">管理密碼<input id="pwIn" type="password" autocomplete="current-password"></label>
-    <label class="field" for="devIn">這台電腦名稱（選填，例如 HESSICPA01；會記在這台電腦上）<input id="devIn" maxlength="40" autocomplete="off"></label>
     <p class="err" id="loginErr" hidden></p>
     <div class="btns"><button class="primary ink" id="btnLogin">登入管理後台</button></div>
-    <p class="small">密碼是在 Netlify 設定的 ADMIN_PASSWORD。</p>
+    <p class="small">使用者名稱會記在這台電腦上，並顯示在登入紀錄。密碼連續輸錯 3 次會暫時鎖定 15 分鐘。</p>
   </div>
 </div>
 
@@ -337,8 +337,8 @@
             <h3>登入紀錄</h3>
             <div class="btns"><label class="ck-inline"><input type="checkbox" id="logFailOnly"> 只看登入失敗</label><button class="small" id="btnLogs">重新整理</button></div>
           </div>
-          <p class="small log-note">每次「輸入密碼登入」記一筆（含密碼錯誤）；同一個分頁重新整理不算新的登入。位置是依 IP 推估的大概城市；電腦名稱在登入畫面填寫，每台電腦填一次即可。</p>
-          <div class="rowhead row lrow"><span>時間</span><span>結果</span><span>電腦名稱</span><span>瀏覽器／系統</span><span>位置</span><span>IP</span></div>
+          <p class="small log-note">每次「輸入密碼登入」記一筆（含密碼錯誤）；同一個分頁重新整理不算新的登入。位置是依 IP 推估的大概城市；使用者名稱在登入畫面填寫。密碼連續輸錯 3 次，該 IP 會暫時鎖定 15 分鐘。</p>
+          <div class="rowhead row lrow"><span>時間</span><span>結果</span><span>使用者</span><span>瀏覽器／系統</span><span>位置</span><span>IP</span></div>
           <div class="rows" id="logRows"><div class="empty">讀取中…</div></div>
           <div class="btns more" id="logMoreWrap" hidden><button class="small" id="logMore">顯示更多</button></div>
         </div>

@@ -66,14 +66,19 @@ async function migrateRemovedCats(s) {
   await s.set("ixv2", "1");
 }
 
-/* 登入紀錄：時間、成功或失敗、IP、大概位置、瀏覽器，以及使用者自己設定的電腦名稱 */
-async function logLogin(s, req, context, ok) {
+/* 密碼連續輸錯 3 次：同一個 IP 鎖定 15 分鐘（鎖定期間任何後台要求都不受理，猜對也不算） */
+const MAX_FAILS = 3, LOCK_MS = 15 * 60 * 1000;
+const clientIp = (req, context) => (context && context.ip) || req.headers.get("x-nf-client-connection-ip") || "unknown";
+const lockKey = ip => "lock/" + String(ip).replace(/[^0-9a-fA-F.:]/g, "_").slice(0, 60);
+
+/* 登入紀錄：時間、成功或失敗、IP、大概位置、瀏覽器，以及使用者名稱（登入時填寫） */
+async function logLogin(s, req, context, ok, note) {
   const g = (context && context.geo) || {};
   const loc = [g.city, g.subdivision && g.subdivision.name, g.country && g.country.name].filter(Boolean).join(", ");
   let device = "";
   try { device = decodeURIComponent(req.headers.get("x-device") || "").trim().slice(0, 40); } catch {}
   const entry = { at: new Date().toISOString(), ok, ip: (context && context.ip) || req.headers.get("x-nf-client-connection-ip") || "",
-    loc, ua: (req.headers.get("user-agent") || "").slice(0, 300), device };
+    loc, ua: (req.headers.get("user-agent") || "").slice(0, 300), device, ...(note ? { note } : {}) };
   const list = (await s.get("loginlog.json", { type: "json" })) || [];
   list.unshift(entry);
   await s.setJSON("loginlog.json", list.slice(0, 500));
@@ -104,14 +109,28 @@ export default async (req, context) => {
   const id = url.searchParams.get("c") || "";
   const s = store();
   const isLogin = a === "ping" && url.searchParams.get("login") === "1";
+  const lk = lockKey(clientIp(req, context)), now = Date.now();
+  const lock = (await s.get(lk, { type: "json" })) || null;
+  if (lock && lock.until > now) {
+    if (isLogin) { try { await logLogin(s, req, context, false, "locked"); } catch {} }
+    return json({ error: "locked", until: new Date(lock.until).toISOString(), mins: Math.ceil((lock.until - now) / 60000) }, 429);
+  }
   if (!authorized(req)) {
-    if (isLogin) { try { await logLogin(s, req, context, false); } catch {} }
+    // 上次輸錯超過 15 分鐘就重新計算
+    const fails = (lock && now - (lock.last || 0) < LOCK_MS ? lock.fails || 0 : 0) + 1;
+    const locked = fails >= MAX_FAILS;
+    await s.setJSON(lk, locked ? { fails: 0, last: now, until: now + LOCK_MS } : { fails, last: now, until: 0 });
+    try { await logLogin(s, req, context, false, locked ? "lock" : ""); } catch {}
     await new Promise(r => setTimeout(r, 400));   // 放慢猜密碼
-    return json({ error: "unauthorized" }, 401);
+    if (locked) return json({ error: "locked", until: new Date(now + LOCK_MS).toISOString(), mins: LOCK_MS / 60000 }, 429);
+    return json({ error: "unauthorized", left: MAX_FAILS - fails }, 401);
   }
 
   if (a === "ping") {
-    if (isLogin) { try { await logLogin(s, req, context, true); } catch {} }
+    if (isLogin) {
+      if (lock) await s.delete(lk);   // 登入成功：錯誤次數歸零
+      try { await logLogin(s, req, context, true); } catch {}
+    }
     return json({ ok: true });
   }
 

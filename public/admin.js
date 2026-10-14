@@ -19,13 +19,21 @@ async function api(a, { method = "GET", body, query = "" } = {}){
   const dev = deviceName(); if (dev) headers["x-device"] = encodeURIComponent(dev);
   if (body && !(body instanceof FormData)) headers["content-type"] = "application/json";
   const r = await fetch(`/api/admin?a=${a}${query}`, { method, headers, body });
-  if (r.status === 401){ logout("密碼不對，請重新輸入。"); throw new Error("unauthorized"); }
+  if (r.status === 401){
+    let left = null; try { left = (await r.clone().json()).left; } catch {}
+    logout(typeof left === "number" && left > 0 ? `密碼不對，請重新輸入。再錯 ${left} 次將暫時鎖定 15 分鐘。` : "密碼不對，請重新輸入。");
+    throw new Error("unauthorized");
+  }
+  if (r.status === 429){
+    let mins = 15; try { mins = (await r.clone().json()).mins || mins; } catch {}
+    logout(`密碼連續輸錯 3 次，已暫時鎖定。請 ${mins} 分鐘後再試。`); throw new Error("unauthorized");
+  }
   if (r.status === 503){ logout("網站還沒設定管理密碼。請到 Netlify 的 Environment variables 新增 ADMIN_PASSWORD，再重新部署。"); throw new Error("no_password"); }
   return r;
 }
 const quiet = e => e && (e.message === "unauthorized" || e.message === "no_password");
 
-/* ---------- 這台電腦的名稱（網頁讀不到電腦名稱，由使用者填寫並記在這台電腦） ---------- */
+/* ---------- 使用者名稱（登入時填寫，記在這台電腦，顯示在登入紀錄） ---------- */
 function deviceName(){ try { return localStorage.getItem("esign.device") || ""; } catch { return ""; } }
 function setDeviceName(v){ try { if (v) localStorage.setItem("esign.device", v); else localStorage.removeItem("esign.device"); } catch {} }
 $("devIn").value = deviceName();
@@ -34,11 +42,12 @@ $("devIn").value = deviceName();
 function logout(msg){
   KEY = ""; ss.del("esign.key");
   $("app").hidden = true; $("loginView").hidden = false;
-  err("loginErr", msg || ""); $("pwIn").focus();
+  err("loginErr", msg || ""); ($("devIn").value.trim() ? $("pwIn") : $("devIn")).focus();
 }
 async function login(){
   KEY = $("pwIn").value; err("loginErr", "");
-  if (!KEY) return err("loginErr", "請輸入密碼。");
+  if (!$("devIn").value.trim()) { $("devIn").focus(); return err("loginErr", "請輸入使用者名稱。"); }
+  if (!KEY) { $("pwIn").focus(); return err("loginErr", "請輸入密碼。"); }
   $("btnLogin").disabled = true;
   setDeviceName($("devIn").value.trim());
   try { const r = await api("ping", { query: "&login=1" }); if (r.ok){ ss.set("esign.key", KEY); $("pwIn").value = ""; await enter(); } }
@@ -47,6 +56,7 @@ async function login(){
 }
 $("btnLogin").onclick = login;
 $("pwIn").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+$("devIn").addEventListener("keydown", e => { if (e.key === "Enter") $("pwIn").focus(); });
 $("btnLogout").onclick = () => logout("已登出。");
 
 async function enter(){
@@ -1401,7 +1411,7 @@ function renderLogs(){
     const row = document.createElement("div"); row.className = "row lrow";
     const cells = [
       ["t", fmtDateTime(new Date(l.at))],
-      ["res " + (l.ok ? "ok" : "bad"), l.ok ? "成功" : "密碼錯誤"],
+      ["res " + (l.ok ? "ok" : "bad"), l.ok ? "成功" : l.note === "locked" ? "鎖定中" : l.note === "lock" ? "密碼錯誤・已鎖定" : "密碼錯誤"],
       ["", l.device || "（未填）"],
       ["", uaText(l.ua || "")],
       ["", l.loc || "—"],
@@ -1422,4 +1432,4 @@ document.addEventListener("visibilitychange", () => {
 });
 
 if (KEY) api("ping").then(r => r.ok && enter()).catch(() => {});
-else $("pwIn").focus();
+else ($("devIn").value.trim() ? $("pwIn") : $("devIn")).focus();

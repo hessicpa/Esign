@@ -237,3 +237,8 @@ button.ink:hover{background:var(--navy-2)}
 button.danger-solid{background:var(--seal);border-color:var(--seal);color:#fff;font-weight:500}
 button.danger-solid:disabled{opacity:.6}
 .qed .r.fill-r{padding-left:14px;color:var(--muted)}
+/* 底部操作列：按鈕緊接在文字後面（靠左），避免被右下角的浮動元件擋住 */
+.savebar{justify-content:flex-start;column-gap:20px}
+/* 登入頁背景 */
+.login{background:#23262d url("login-bg.jpg") center/cover no-repeat}
+.login-card{box-shadow:0 18px 50px rgba(0,0,0,.35);border-color:transparent}
