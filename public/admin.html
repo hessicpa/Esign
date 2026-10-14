@@ -15,14 +15,18 @@
 
 <!-- ===== 登入 ===== -->
 <div class="login" id="loginView">
+  <div class="login-hero" aria-hidden="true"></div>
+  <div class="login-inner">
+  <div class="login-firm">禾識會計師事務所</div>
   <div class="login-card">
-    <img class="login-logo" src="logo.png" alt="禾識會計師事務所">
+    <img class="login-logo" src="logo-mark.png" alt="Hessí">
     <div class="login-title">電子文件簽署系統</div>
     <label class="field" for="devIn">使用者名稱<input id="devIn" maxlength="40" autocomplete="username" placeholder="例如 Carrie"></label>
     <label class="field" for="pwIn">管理密碼<input id="pwIn" type="password" autocomplete="current-password"></label>
     <p class="err" id="loginErr" hidden></p>
     <div class="btns"><button class="primary ink" id="btnLogin">登入管理後台</button></div>
     <p class="small">使用者名稱會記在這台電腦上，並顯示在登入紀錄。密碼連續輸錯 3 次會暫時鎖定 15 分鐘。</p>
+  </div>
   </div>
 </div>
 

@@ -239,6 +239,12 @@ button.danger-solid:disabled{opacity:.6}
 .qed .r.fill-r{padding-left:14px;color:var(--muted)}
 /* 底部操作列：按鈕緊接在文字後面（靠左），避免被右下角的浮動元件擋住 */
 .savebar{justify-content:flex-start;column-gap:20px}
-/* 登入頁背景 */
-.login{background:#23262d url("login-bg.jpg") center/cover no-repeat}
-.login-card{box-shadow:0 18px 50px rgba(0,0,0,.35);border-color:transparent}
+/* 登入頁：上方照片橫幅＋深藍底，事務所名稱在登入框上方 */
+.login{position:relative;min-height:100vh;background:#1d2a3a;display:flex;justify-content:center;align-items:flex-start;padding:clamp(72px,20vh,190px) 16px 48px;overflow:hidden}
+.login-hero{position:absolute;inset:0 0 auto 0;height:max(46vh,280px);background:linear-gradient(180deg,rgba(18,28,42,.25),rgba(18,28,42,.55)),url("login-bg.jpg") center/cover no-repeat}
+.login-inner{position:relative;width:min(420px,100%);display:grid;gap:16px}
+.login-firm{color:#fff;font-weight:600;text-align:center;font-family:var(--f-display);font-size:clamp(18px,2.2vw,22px);letter-spacing:.42em;padding-left:.42em;text-shadow:0 2px 10px rgba(0,0,0,.45)}
+.login .login-card{width:100%;border-radius:28px;border-color:transparent;padding:30px 30px 34px;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.login .login-logo{width:150px}
+.login .login-title{font-size:21px;letter-spacing:.38em;padding-left:.38em;padding-bottom:12px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .login .login-logo{filter:invert(1) brightness(1.6)}}
