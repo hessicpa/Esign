@@ -202,6 +202,30 @@ function updateBulk(){
 }
 $("bulkAll").onclick = () => { for (const r of filtered()) SEL.add(r.id); renderRows(); };
 $("bulkNone").onclick = () => { SEL.clear(); renderRows(); };
+$("bulkTitle").onclick = async () => {
+  const ids = [...SEL]; if (!ids.length) return;
+  const titles = [...new Set(ROWS.filter(r => SEL.has(r.id)).map(r => r.title))];
+  const now = titles.length === 1 ? titles[0] : "";
+  const nSigned = ROWS.filter(r => SEL.has(r.id) && r.signedAt).length;
+  const t = prompt(`把選取的 ${ids.length} 份合約改成新的合約名稱：` + (nSigned ? `\n（其中 ${nSigned} 份已簽署：已簽 PDF 內容不會變，只改清單與檔名上的名稱）` : ""), now || catOf(CAT).label);
+  if (t === null) return;
+  const title = t.trim();
+  if (!title) { toast("合約名稱不能空白"); return; }
+  const b = $("bulkTitle"); b.disabled = true;
+  let done = 0;
+  try {
+    for (let i = 0; i < ids.length; i += 100){
+      const part = ids.slice(i, i + 100);
+      b.textContent = `修改中 ${done}/${ids.length}…`;
+      const r = await api("retitle", { method: "POST", body: JSON.stringify({ ids: part, title }) });
+      if (!r.ok) throw new Error(r.status);
+      done += part.length;
+      const set = new Set(part); ROWS.forEach(x => { if (set.has(x.id)) x.title = title; });
+    }
+    toast(`已把 ${done} 份合約改成「${title}」`, 3500); SEL.clear();
+  } catch (e) { if (!quiet(e)) toast(done ? `已修改 ${done} 份，其餘失敗，請再試一次` : "修改失敗，請再試一次", 4000); }
+  finally { b.disabled = false; b.textContent = "修改合約名稱"; renderRows(); }
+};
 $("bulkDel").onclick = async () => {
   const ids = [...SEL]; if (!ids.length) return;
   const nSigned = ROWS.filter(r => SEL.has(r.id) && r.signedAt).length;

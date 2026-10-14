@@ -46,6 +46,7 @@ async function boot(){
       ? `請往下閱讀全部內容，並回答文件下方的題目。第 ${C.sig.page + 1} 頁有紅框簽名處。`
       : `請往下閱讀全部內容，第 ${C.sig.page + 1} 頁有紅框簽名處。`;
     setStep("read");
+    $("paperRow").hidden = false;
   } catch (e) { console.error(e); $("pages").innerHTML = '<div class="loading">文件無法顯示，請重新整理頁面。</div>'; }
 }
 
@@ -68,12 +69,32 @@ async function showSignedView(){
   $("hint").textContent = C.canResign
     ? "以下是你先前簽好的文件。事務所已開放重新簽署，如需修改請按「重新簽署」。"
     : "以下是你簽好的文件。";
-  $("qSection").hidden = true;
+  $("qSection").hidden = true; $("paperRow").hidden = true;
   $("barSign").hidden = true; $("barDone").hidden = false;
   $("done").hidden = true;
   setStep("done");
   return true;
 }
+
+/* ---------- 下載空白 PDF（列印紙本簽署）：有設定客戶名稱位置的話，先把名稱填上 ---------- */
+$("btnPaper").onclick = async () => {
+  const b = $("btnPaper"), label = b.textContent; b.disabled = true; b.textContent = "準備中…";
+  try {
+    let bytes = C.pdfBytes;
+    if (C.nameAt && C.name && origPdf){
+      const doc = await PDFLib.PDFDocument.load(C.pdfBytes, { ignoreEncryption: true });
+      await stampText(doc, doc.getPages(), C.nameAt, C.name);
+      bytes = await doc.save();
+    }
+    const name = [cleanName(C.name), cleanName(C.title) || "文件"].filter(Boolean).join("_") + "_紙本簽署.pdf";
+    if (/\bLine\//i.test(navigator.userAgent)){
+      // LINE 內建瀏覽器不能直接下載檔案：改用分享，或請客戶用一般瀏覽器開啟
+      if (canShareFiles){ try { await navigator.share({ files: [new File([bytes], name, { type: "application/pdf" })], title: C.title }); } catch {} }
+      else notice("LINE 裡無法直接下載", "請點右上角「⋯」→「用預設瀏覽器開啟」，再按一次「下載 PDF」。");
+    } else saveBlob(new Blob([bytes], { type: "application/pdf" }), name);
+  } catch (e) { console.error(e); toast("下載失敗，請再試一次"); }
+  finally { b.disabled = false; b.textContent = label; }
+};
 
 /* ---------- 提示視窗（取代瀏覽器的 alert） ---------- */
 function notice(title, text){
@@ -503,7 +524,7 @@ $("btnRedo").onclick = async () => {
   }
   signedBytes = null; strokes = [];
   $("done").hidden = true; $("barDone").hidden = true; $("barReview").hidden = true; $("barSign").hidden = false; $("signedBanner").hidden = true;
-  $("qSection").hidden = !C.questions.length;
+  $("qSection").hidden = !C.questions.length; $("paperRow").hidden = false;
   lockQuestions(false);
   $("hint").textContent = C.questions.length && C.answers
     ? "已帶入您上次填寫的答案，只要更正需要修改的題目，再重新簽名即可。提交後會取代先前的版本。"

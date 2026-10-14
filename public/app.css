@@ -149,3 +149,6 @@ a.btnlink.seal:focus-visible{outline-color:color-mix(in srgb,var(--seal) 45%,tra
 .q.missing .qinput{border-color:var(--seal)}
 .mark.qtext{border-bottom:2px dashed var(--date);color:var(--date);transform:translateY(-100%);white-space:nowrap;padding:0 2px;background:color-mix(in srgb,var(--date) 8%,transparent);justify-content:flex-start}
 .opt-fill{margin:-2px 0 4px 34px;width:calc(100% - 34px)}
+.paper-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:10px}
+.paper-row .small{color:var(--muted)}
+.paper-row button{font-size:13.5px;padding:6px 12px}

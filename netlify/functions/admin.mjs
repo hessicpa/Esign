@@ -225,6 +225,20 @@ export default async (req, context) => {
     return json({ ok: true });
   }
 
+  // 批次修改合約名稱（客戶簽署頁上方顯示的標題、檔名）；每次最多 100 份
+  if (a === "retitle" && req.method === "POST") {
+    let body;
+    try { body = await req.json(); } catch { return json({ error: "bad_request" }, 400); }
+    const title = typeof body.title === "string" ? body.title.trim().slice(0, 200) : "";
+    const ids = [...new Set(Array.isArray(body.ids) ? body.ids : [])].filter(x => ID_RE.test(String(x)));
+    if (!title || !ids.length || ids.length > 100) return json({ error: "bad_request" }, 400);
+    await mapLimit(ids, 8, async x => {
+      const m = await s.get(`contracts/${x}.json`, { type: "json" });
+      if (m && m.title !== title) { m.title = title; await s.setJSON(`contracts/${x}.json`, m); }
+    });
+    return json({ ok: true, updated: ids.length });
+  }
+
   // 一次刪除多份合約（後台「全選 → 刪除所選」；每次最多 100 份，前端會分批送）
   if (a === "deleteMany" && req.method === "POST") {
     let body;
