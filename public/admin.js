@@ -3,7 +3,7 @@ const CATS = [
   { id: "registration", label: "工商合約",       group: "合約",   tone: "--tone-teal"  },
   { id: "withholding",  label: "扣繳確認函",     group: "確認函", tone: "--tone-sage"  },
   { id: "provisional",  label: "暫繳確認函",     group: "確認函", tone: "--tone-khaki" },
-  { id: "nonop",        label: "業外資訊確認函", group: "確認函", tone: "--tone-khaki" },
+  { id: "nonop",        label: "年度結算事項確認", group: "確認函", tone: "--tone-khaki" },
   { id: "settlement",   label: "結算申報確認函", group: "確認函", tone: "--tone-khaki" },
   { id: "uncat",        label: "未分類", group: "其他", tone: "--tone-grey", onlyIfAny: true },
 ];
